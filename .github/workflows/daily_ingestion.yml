@@ -1,0 +1,38 @@
+name: Daily Data Ingestion
+
+on:
+  schedule:
+    # Runs at 12:00 PM UTC (5:00 PM PKT) every Monday through Friday
+    # This safely clears the PSX Friday split-session close (4:30 PM PKT)
+    # as well as the standard Mon-Thu close (3:30 PM PKT).
+    - cron: '0 12 * * 1-5'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  ingest-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Daily Ingestion Script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/ingest_daily_data.py
+        
+      - name: Compute Daily Indicators
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/compute_indicators_daily.py
