@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ArrowRight, LoaderCircle, Mail, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginForm({ next }: { next: string }) {
@@ -11,51 +12,79 @@ export default function LoginForm({ next }: { next: string }) {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus("sending");
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
-    });
-    if (error) {
-      setError(error.message);
-      setStatus("error");
-    } else {
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+      });
+      if (error) throw error;
       setStatus("sent");
+    } catch (err) {
+      setError(err instanceof Error && err.message !== "Failed to fetch"
+        ? err.message
+        : "We couldn't reach the sign-in service. Please try again in a moment.");
+      setStatus("error");
     }
   }
 
   if (status === "sent") {
     return (
-      <p role="status" className="mt-6 rounded-md border border-line bg-surface p-4 text-sm">
-        Check <strong>{email}</strong> for a sign-in link. It expires in an hour.
-      </p>
+      <div role="status" className="mt-8 rounded-xl border border-line bg-brand-soft p-5 text-center">
+        <MailCheck className="mx-auto size-8 text-brand" />
+        <p className="mt-3 font-semibold text-primary">Check your inbox</p>
+        <p className="mt-1 text-sm text-secondary">
+          We sent a sign-in link to <strong className="text-primary">{email}</strong>. It expires in one hour.
+        </p>
+        <button
+          type="button"
+          onClick={() => setStatus("idle")}
+          className="mt-4 text-sm font-medium text-brand hover:underline"
+        >
+          Use a different email
+        </button>
+      </div>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="mt-6 space-y-3">
-      <label htmlFor="email" className="block text-sm font-medium">
-        Email
-      </label>
-      <input
-        id="email"
-        type="email"
-        required
-        autoComplete="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        className="w-full rounded-md border border-line bg-surface px-3 py-2 outline-none focus:border-accent"
-        placeholder="you@example.com"
-      />
+    <form onSubmit={onSubmit} className="mt-8 space-y-4">
+      <div>
+        <label htmlFor="email" className="block text-sm font-medium">
+          Email address
+        </label>
+        <div className="relative mt-2">
+          <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
+          <input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            autoFocus
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-xl border border-line bg-surface py-3 pl-10 pr-3 outline-none transition placeholder:text-muted focus:border-brand focus:ring-4 focus:ring-brand/15"
+            placeholder="you@example.com"
+          />
+        </div>
+      </div>
       <button
         type="submit"
         disabled={status === "sending"}
-        className="w-full rounded-md bg-accent px-3 py-2 font-medium text-accent-ink disabled:opacity-60"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 font-medium text-brand-ink shadow-card transition hover:bg-brand-strong disabled:opacity-70"
       >
-        {status === "sending" ? "Sending…" : "Email me a sign-in link"}
+        {status === "sending" ? (
+          <>
+            <LoaderCircle className="size-4 animate-spin" /> Sending link…
+          </>
+        ) : (
+          <>
+            Email me a sign-in link <ArrowRight className="size-4" />
+          </>
+        )}
       </button>
       {status === "error" && (
-        <p role="alert" className="text-sm text-loss">
+        <p role="alert" className="rounded-xl bg-loss-soft p-3 text-sm text-loss">
           {error}
         </p>
       )}

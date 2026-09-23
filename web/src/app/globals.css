@@ -1,54 +1,98 @@
 @import "tailwindcss";
 
-/* Colour tokens. Dark values are chosen for the dark surface, not inverted. */
+/* Design tokens. Dark values are chosen for the dark surface, not inverted. */
 :root {
   color-scheme: light;
-  --page: #f6f6f4;
-  --surface: #fcfcfb;
-  --line: #e4e3df;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #6f6e69;
-  --accent: #1f6f43;
-  --accent-ink: #ffffff;
-  --gain: #1a7f37;
-  --loss: #c4302b;
+  --page: #f6f7f5;
+  --surface: #ffffff;
+  --surface-2: #f1f3f0;
+  --line: #e3e6e1;
+  --line-strong: #cfd4cc;
+  --text-primary: #0c1512;
+  --text-secondary: #4a5550;
+  --text-muted: #6b756f;
+
+  --brand: #047857;
+  --brand-strong: #065f46;
+  --brand-ink: #ffffff;
+  --brand-soft: #e6f4ee;
+  --brand-soft-ink: #065f46;
+  --gold: #b7862c;
+  --gold-soft: #f7efdc;
+
+  --gain: #15803d;
+  --gain-soft: #e7f5ec;
+  --loss: #c2410c;
+  --loss-soft: #fcede5;
+
   /* Chart series: validated categorical slots 1–3 (blue, orange, aqua) */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
+
+  --shadow-card: 0 1px 2px rgb(12 21 18 / 0.04), 0 1px 3px rgb(12 21 18 / 0.06);
+  --shadow-lift: 0 10px 30px -10px rgb(12 21 18 / 0.18), 0 2px 6px rgb(12 21 18 / 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --page: #121211;
-    --surface: #1a1a19;
-    --line: #33332f;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #9a998f;
-    --accent: #3fa46a;
-    --accent-ink: #0b0b0b;
-    --gain: #4cc36b;
-    --loss: #f2706b;
+    --page: #0a0f0d;
+    --surface: #111916;
+    --surface-2: #17211d;
+    --line: #22302a;
+    --line-strong: #2f4038;
+    --text-primary: #f2f6f4;
+    --text-secondary: #b6c2bc;
+    --text-muted: #8a9690;
+
+    --brand: #34d399;
+    --brand-strong: #6ee7b7;
+    --brand-ink: #04130d;
+    --brand-soft: #0f2a20;
+    --brand-soft-ink: #6ee7b7;
+    --gold: #e0b35c;
+    --gold-soft: #2a2212;
+
+    --gain: #4ade80;
+    --gain-soft: #10281a;
+    --loss: #fb923c;
+    --loss-soft: #2d1a10;
+
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-lift: 0 16px 40px -12px rgb(0 0 0 / 0.6);
   }
 }
 
 @theme inline {
   --color-page: var(--page);
   --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-primary: var(--text-primary);
   --color-secondary: var(--text-secondary);
   --color-muted: var(--text-muted);
-  --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-soft-ink: var(--brand-soft-ink);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
   --color-gain: var(--gain);
+  --color-gain-soft: var(--gain-soft);
   --color-loss: var(--loss);
+  --color-loss-soft: var(--loss-soft);
+  /* Kept for components written against the first palette */
+  --color-accent: var(--brand);
+  --color-accent-ink: var(--brand-ink);
+  --shadow-card: var(--shadow-card);
+  --shadow-lift: var(--shadow-lift);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -56,4 +100,29 @@
 body {
   background: var(--page);
   color: var(--text-primary);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Soft brand glow behind hero sections */
+.hero-glow {
+  background:
+    radial-gradient(60rem 30rem at 85% -10%, color-mix(in oklab, var(--brand) 14%, transparent), transparent 70%),
+    radial-gradient(40rem 24rem at -10% 10%, color-mix(in oklab, var(--gold) 10%, transparent), transparent 70%);
+}
+
+/* Faint geometric grid, a quiet nod to Islamic pattern work */
+.pattern-grid {
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }

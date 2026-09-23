@@ -1,6 +1,8 @@
 "use client";
 
 import { useId, useMemo, useState, useTransition } from "react";
+import { LoaderCircle, Plus, Search } from "lucide-react";
+import { TickerBadge } from "@/components/market";
 import { addTicker } from "./actions";
 
 interface Option {
@@ -79,13 +81,17 @@ export default function AddStock({ options }: { options: Option[] }) {
         onKeyDown={onKeyDown}
         disabled={pending}
         placeholder="Add a company: search by ticker, name or sector"
-        className="w-full rounded-md border border-line bg-surface px-3 py-2 outline-none focus:border-accent disabled:opacity-60"
+        className="w-full rounded-xl border border-line bg-surface-2 py-3 pl-11 pr-10 outline-none transition placeholder:text-muted focus:border-brand focus:bg-surface focus:ring-4 focus:ring-brand/15 disabled:opacity-60"
       />
+      <Search className="pointer-events-none absolute left-4 top-[1.4rem] size-4 -translate-y-1/2 text-muted" />
+      {pending && (
+        <LoaderCircle className="absolute right-4 top-[1.4rem] size-4 -translate-y-1/2 animate-spin text-brand" />
+      )}
       {results.length > 0 && (
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-line bg-surface shadow-lg"
+          className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-line bg-surface p-1.5 shadow-lift"
         >
           {results.map((o, i) => (
             <li
@@ -98,24 +104,28 @@ export default function AddStock({ options }: { options: Option[] }) {
                 e.preventDefault(); // keep focus in the input
                 add(o.ticker);
               }}
-              className={`flex cursor-pointer items-baseline justify-between gap-3 px-3 py-2 text-sm ${
-                i === active ? "bg-page" : ""
+              className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm ${
+                i === active ? "bg-surface-2" : ""
               }`}
             >
-              <span>
-                <span className="font-medium">{o.ticker}</span>{" "}
-                <span className="text-secondary">{o.company_name}</span>
+              <TickerBadge ticker={o.ticker} />
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold">{o.ticker}</span>
+                <span className="block truncate text-xs text-secondary">{o.company_name}</span>
               </span>
-              <span className="shrink-0 text-xs text-muted">{o.sector}</span>
+              <span className="hidden shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-muted sm:inline">
+                {o.sector ?? "Other"}
+              </span>
+              <Plus className={`size-4 shrink-0 ${i === active ? "text-brand" : "text-muted"}`} />
             </li>
           ))}
         </ul>
       )}
       {query.trim() && !results.length && (
-        <p className="mt-2 text-sm text-muted">No Shariah-compliant company matches “{query}”.</p>
+        <p className="mt-3 text-sm text-muted">No Shariah-compliant company matches “{query}”.</p>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-sm text-loss">
+        <p role="alert" className="mt-3 rounded-lg bg-loss-soft px-3 py-2 text-sm text-loss">
           {error}
         </p>
       )}
