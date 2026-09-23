@@ -166,34 +166,45 @@ def test_ingest_prices_reports_failures_without_stopping(monkeypatch):
 
 # --- universe ---------------------------------------------------------------
 
-def run_universe(monkeypatch, existing, records, is_live):
+def run_universe(monkeypatch, existing, fetch):
     import update_universe as uu
     db = FakeDB({"halal_universe": existing})
     monkeypatch.setattr(uu, "supabase", db)
-    monkeypatch.setattr(uu, "fetch_constituents", lambda: ([dict(r) for r in records], is_live))
-    assert uu.main() == 0
-    return db
+    monkeypatch.setattr(uu, "fetch_constituents", fetch)
+    return db, uu.main()
 
 
-def test_universe_live_preserves_added_date_and_deactivates_leavers(monkeypatch):
-    kmi = [{"ticker": f"T{i}", "company_name": f"Co {i}"} for i in range(30)]
-    db = run_universe(monkeypatch, [
+def constituents(n):
+    return lambda: [{"ticker": f"T{i}", "company_name": f"Co {i}", "is_kmi_30": i < 30} for i in range(n)]
+
+
+def test_universe_preserves_added_date_and_deactivates_leavers(monkeypatch):
+    db, status = run_universe(monkeypatch, [
         {"ticker": "T0", "is_active": True},
         {"ticker": "T1", "is_active": False},
         {"ticker": "OLD", "is_active": True},
-    ], kmi, True)
+    ], constituents(313))
 
+    assert status == 0
     upserts = {c.payload["ticker"]: c.payload for c in db.ops("upsert")}
     assert "added_date" not in upserts["T0"]  # existing: untouched
     assert "added_date" in upserts["T1"]      # re-entering
     assert "added_date" in upserts["T5"]      # new
+    assert upserts["T5"]["is_kmi_30"] and not upserts["T40"]["is_kmi_30"]
     (update,) = db.ops("update")
     assert update.filters["ticker"] == ("in", ["OLD"])
     assert update.payload["is_active"] is False
 
 
-def test_universe_fallback_writes_no_placeholders_and_deactivates_nothing(monkeypatch):
-    db = run_universe(monkeypatch, [{"ticker": "OLD", "is_active": True}], [{"ticker": "T0"}], False)
-    (upsert,) = db.ops("upsert")
-    assert "company_name" not in upsert.payload
+def test_universe_short_list_deactivates_nothing(monkeypatch):
+    db, status = run_universe(monkeypatch, [{"ticker": "OLD", "is_active": True}], constituents(40))
+    assert status == 0
     assert not db.ops("update")
+
+
+def test_universe_fetch_failure_changes_nothing(monkeypatch):
+    def boom():
+        raise ConnectionError("PSX down")
+    db, status = run_universe(monkeypatch, [{"ticker": "OLD", "is_active": True}], boom)
+    assert status == 1
+    assert not db.ops("upsert") and not db.ops("update")

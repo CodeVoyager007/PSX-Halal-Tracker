@@ -6,3 +6,4 @@ python-dotenv==1.2.2
 pandas==3.0.5
 numpy==2.5.1
 pandas-ta-classic==0.6.52
+httpx==0.28.1

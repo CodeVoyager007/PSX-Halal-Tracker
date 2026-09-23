@@ -1,55 +1,60 @@
 import sys
 import psxdata
 import pandas as pd
-from datetime import datetime
-from common import supabase
+from common import supabase, now_pkt
 
-# Manually maintained fallback list of KMI-30 constituents.
-# Refreshed twice a year based on PSX / Al Meezan notices.
-MANUAL_KMI_30 = [
-    'AIRLINK', 'ATRL', 'CPHL', 'DGKC', 'EFERT', 'ENGROH', 'FCCL', 'FFC', 'FFL', 'GAL',
-    'GHNI', 'HCAR', 'HUBC', 'LUCK', 'MARI', 'MEBL', 'MLCF', 'NML', 'NRL', 'OGDC',
-    'PAEL', 'PPL', 'PRL', 'PSO', 'SAZEW', 'SEARL', 'SNGP', 'SSGC', 'SYS', 'TREET'
-]
+# The halal universe is the KMI All-Share index (every Shariah-compliant PSX
+# stock); KMI-30 membership is kept as a flag for filtering.
+ALL_SHARE_INDEX = "KMIALLSHR"
+KMI_30_INDEX = "KMI30"
 
 # A live list shorter than this is treated as a partial/garbled fetch, and no
 # tickers are deactivated on the strength of it.
-MIN_CONSTITUENTS = 25
+MIN_CONSTITUENTS = 250
 
 
-def fetch_constituents() -> tuple[list[dict], bool]:
+def fetch_constituents() -> list[dict]:
     """
-    Return (records, is_live). Each record holds the ticker plus only the fields
-    actually known, so an upsert never overwrites good data with placeholders.
+    Return one record per KMI All-Share constituent with name, sector, market cap
+    and KMI-30 flag. Raises if PSX data is unavailable: the universe only
+    changes a few times a year, so skipping a run is safer than guessing.
     """
-    try:
-        print("Fetching KMI30 constituents via psxdata...")
-        df = psxdata.indices("KMI30")
-        if df is None or df.empty or "symbol" not in df.columns or "name" not in df.columns:
-            raise ValueError("psxdata returned empty or is missing 'symbol'/'name' columns for KMI30.")
+    all_share = psxdata.indices(ALL_SHARE_INDEX, cache=False)
+    kmi_30 = psxdata.indices(KMI_30_INDEX, cache=False)
+    for name, df in [(ALL_SHARE_INDEX, all_share), (KMI_30_INDEX, kmi_30)]:
+        if df is None or df.empty or "symbol" not in df.columns:
+            raise ValueError(f"psxdata returned no constituents for {name}.")
 
-        records = []
-        for row in df.to_dict("records"):
-            record = {"ticker": row["symbol"], "company_name": row["name"]}
-            # market_cap_m units: PKR millions, as returned by psxdata.
-            if pd.notna(row.get("market_cap_m")):
-                record["market_cap_m"] = float(row["market_cap_m"])
-            records.append(record)
-        print(f"Success! Auto-fetched {len(records)} KMI-30 constituents via psxdata.")
-        return records, True
-    except Exception as e:
-        print(f"Auto-fetch failed or unsupported: {e}")
-        print("Falling back to manually-maintained KMI-30 list.")
-        # Names and market caps are unknown here; leave existing values untouched
-        return [{"ticker": t} for t in MANUAL_KMI_30], False
+    kmi_30_symbols = set(kmi_30["symbol"])
+    sectors = psxdata.symbols(cache=False).set_index("symbol")["sector_name"].to_dict()
+
+    records = []
+    for row in all_share.to_dict("records"):
+        ticker = row["symbol"]
+        record = {"ticker": ticker, "is_kmi_30": ticker in kmi_30_symbols}
+        if pd.notna(row.get("name")):
+            record["company_name"] = row["name"]
+        # market_cap_m units: PKR millions, as returned by psxdata.
+        if pd.notna(row.get("market_cap_m")):
+            record["market_cap_m"] = float(row["market_cap_m"])
+        if sectors.get(ticker):
+            record["sector"] = sectors[ticker].title()
+        records.append(record)
+    return records
 
 
 def main() -> int:
-    print("Updating Halal Universe (KMI-30)...")
-    records, is_live = fetch_constituents()
-    print(f"Total tickers to process: {len(records)}")
+    print(f"Updating Halal Universe ({ALL_SHARE_INDEX}) at {now_pkt().isoformat()}")
+    try:
+        records = fetch_constituents()
+    except Exception as e:
+        print(f"ERROR: could not fetch constituents, universe left unchanged: {e}")
+        return 1
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    kmi_30_count = sum(r["is_kmi_30"] for r in records)
+    print(f"Fetched {len(records)} constituents ({kmi_30_count} in KMI-30).")
+
+    today = now_pkt().strftime("%Y-%m-%d")
 
     existing_resp = supabase.table("halal_universe").select("ticker, is_active").execute()
     existing = {row["ticker"]: row for row in existing_resp.data}
@@ -58,33 +63,26 @@ def main() -> int:
     # 1. Upsert current constituents
     for record in records:
         ticker = record["ticker"]
-        record.update({
-            "is_kmi_30": True,
-            "is_kmi_all_share": True,
-            "is_active": True,
-            "removed_date": None,
-        })
+        record.update({"is_kmi_all_share": True, "is_active": True, "removed_date": None})
         # Only stamp added_date when the ticker is new or re-entering the universe,
         # so re-runs do not erase when it originally joined.
         if ticker not in existing or not existing[ticker]["is_active"]:
             record["added_date"] = today
+            print(f"  Adding {ticker}.")
 
         try:
             supabase.table("halal_universe").upsert(record).execute()
-            print(f"  Added/Updated {ticker} in halal_universe.")
         except Exception as e:
             print(f"  Failed to update {ticker}: {e}")
             failed.append(ticker)
 
-    # 2. Soft-delete tickers that have left the index
+    # 2. Soft-delete tickers that have left the index. Their history is kept;
+    # they stop being ingested and disappear from watchlist choices.
     current = {r["ticker"] for r in records}
     removed = sorted(t for t, row in existing.items() if row["is_active"] and t not in current)
 
     if removed:
-        if not is_live:
-            print(f"Not deactivating {', '.join(removed)}: the list came from the manual fallback, "
-                  "which may be out of date. Update MANUAL_KMI_30 or re-run when psxdata is reachable.")
-        elif len(records) < MIN_CONSTITUENTS:
+        if len(records) < MIN_CONSTITUENTS:
             print(f"Not deactivating {', '.join(removed)}: live list has only {len(records)} tickers "
                   f"(expected at least {MIN_CONSTITUENTS}), which looks like a partial fetch.")
         else:
@@ -92,9 +90,10 @@ def main() -> int:
                 supabase.table("halal_universe").update({
                     "is_active": False,
                     "is_kmi_30": False,
+                    "is_kmi_all_share": False,
                     "removed_date": today,
                 }).in_("ticker", removed).execute()
-                print(f"  Deactivated {len(removed)} ticker(s) no longer in KMI-30: {', '.join(removed)}")
+                print(f"  Deactivated {len(removed)} ticker(s) no longer Shariah-compliant: {', '.join(removed)}")
             except Exception as e:
                 print(f"  Failed to deactivate removed tickers: {e}")
                 failed.append("deactivation")

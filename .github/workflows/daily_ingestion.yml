@@ -20,7 +20,9 @@ permissions:
 jobs:
   ingest-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A full KMI All-Share run (~310 tickers) takes well under this; first-time
+    # backfills of newly added tickers take longer.
+    timeout-minutes: 60
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -51,6 +53,17 @@ jobs:
       - name: Compute Daily Indicators
         if: ${{ !cancelled() }}
         run: python scripts/compute_indicators_daily.py
+
+      # Sends each subscriber their watchlist digest. digest_log prevents
+      # duplicates, so this is safe after partial failures and re-runs.
+      # Skipped (not failed) until RESEND_API_KEY is configured.
+      - name: Send Watchlist Digests
+        if: ${{ !cancelled() }}
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DIGEST_FROM: ${{ vars.DIGEST_FROM }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: python scripts/send_digests.py
 
       # GitHub disables scheduled workflows after 60 days without repository
       # activity. Re-enabling via the API on every run keeps the schedule alive.

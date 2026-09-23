@@ -24,10 +24,13 @@ def main() -> int:
 
     print(f"Found {len(tickers)} active tickers in the universe.")
 
+    previously_stored = []
+
     def start_for(ticker: str):
         latest = get_latest_trade_date(ticker)
         if latest is None:
             return now.date() - timedelta(days=BACKFILL_DAYS)
+        previously_stored.append(latest)
         return latest - timedelta(days=OVERLAP_DAYS)
 
     newest, failed = ingest_prices(tickers, start_for)
@@ -37,9 +40,9 @@ def main() -> int:
         print(f"\nERROR: {len(failed)} ticker(s) failed: {', '.join(failed)}")
         status = 1
 
-    # Recheck against the database, since this run may legitimately add nothing (holiday)
-    stored = [d for d in (get_latest_trade_date(t) for t in tickers) if d]
-    newest_stored = max(stored) if stored else None
+    # This run may legitimately add nothing (holiday), so also count what was already stored
+    candidates = previously_stored + ([newest] if newest else [])
+    newest_stored = max(candidates) if candidates else None
     if newest_stored is None or (now.date() - newest_stored).days > STALE_AFTER_DAYS:
         print(f"\nERROR: newest stored price is {newest_stored}; more than {STALE_AFTER_DAYS} days old.")
         status = 1

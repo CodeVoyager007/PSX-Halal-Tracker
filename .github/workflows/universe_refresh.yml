@@ -1,0 +1,39 @@
+name: Weekly Universe Refresh
+
+on:
+  schedule:
+    # Sundays 06:00 UTC (11:00 AM PKT), before the week's first session.
+    # New constituents are backfilled automatically by the next daily run.
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-ingestion # never overlap a daily run writing the same tables
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh-universe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh KMI All-Share Universe
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/update_universe.py
