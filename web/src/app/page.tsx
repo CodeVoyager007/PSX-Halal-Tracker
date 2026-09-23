@@ -18,7 +18,7 @@ import { ChangePill, Sparkline, TickerBadge } from "@/components/market";
 const PREVIEW = [
   { ticker: "MEBL", name: "Meezan Bank", price: "550.42", change: 1.84, trend: [30, 31, 30.5, 32, 33, 32.6, 34, 35] },
   { ticker: "OGDC", name: "Oil & Gas Development", price: "318.41", change: 0.29, trend: [20, 21, 20.4, 21.5, 21, 22, 21.8, 22.3] },
-  { ticker: "LUCK", name: "Lucky Cement", price: "423.79", change: -0.62, trend: [40, 41, 42, 41.5, 41, 40.2, 40.5, 39.8] },
+  { ticker: "HUBC", name: "Hub Power Company", price: "204.51", change: -0.62, trend: [40, 41, 42, 41.5, 41, 40.2, 40.5, 39.8] },
   { ticker: "SYS", name: "Systems Limited", price: "121.20", change: 2.41, trend: [10, 10.4, 10.2, 10.9, 11.3, 11.1, 11.8, 12.2] },
 ];
 
@@ -114,7 +114,7 @@ function ProductPreview() {
           <div className="min-w-0">
             <div className="text-xs text-muted">Today, 5:04 PM</div>
             <div className="truncate text-sm font-semibold">Daily halal watchlist · 22 Sep</div>
-            <div className="truncate text-xs text-secondary">SYS +2.41%, MEBL +1.84%, LUCK −0.62%</div>
+            <div className="truncate text-xs text-secondary">SYS +2.41%, MEBL +1.84%, HUBC −0.62%</div>
           </div>
         </div>
       </div>

@@ -10,6 +10,14 @@ const PROTECTED = ["/dashboard", "/stocks"];
  * pages to the login page.
  */
 export async function proxy(request: NextRequest) {
+  // When a redirect URL is not on Supabase's allow list, the sign-in link falls
+  // back to the Site URL root. Forward its one-time code to the callback.
+  if (request.nextUrl.pathname === "/" && request.nextUrl.searchParams.has("code")) {
+    const callback = request.nextUrl.clone();
+    callback.pathname = "/auth/callback";
+    return NextResponse.redirect(callback);
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

@@ -11,7 +11,7 @@ import { addTickerForm, removeTicker, updateDigest } from "./actions";
 export const metadata = { title: "Dashboard · PSX Halal Tracker" };
 
 // Offered as one-click adds on an empty watchlist, when present in the universe
-const SUGGESTED = ["MEBL", "OGDC", "LUCK", "SYS", "HUBC", "ENGROH", "PPL", "MARI"];
+const SUGGESTED = ["MEBL", "OGDC", "SYS", "HUBC", "ENGROH", "PPL", "EFERT", "ATRL"];
 
 function StatCard({
   icon: Icon,
