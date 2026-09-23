@@ -4,9 +4,12 @@ Both indicator scripts import from here so the daily and backfill paths
 cannot drift apart.
 """
 import os
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable
 import numpy as np
 import pandas as pd
 import pandas_ta_classic as ta  # noqa: F401 — registers the DataFrame.ta accessor
+import psxdata
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -40,9 +43,126 @@ MACD_COLUMNS = {"MACD_": "macd", "MACDh_": "macd_histogram", "MACDs_": "macd_sig
 BBANDS_COLUMNS = {"BBL_": "bb_lower", "BBM_": "bb_middle", "BBU_": "bb_upper"}
 
 
+PKT = timezone(timedelta(hours=5))
+
+# PSX closes 3:30 PM Mon–Thu and 4:30 PM Fri; before 5 PM PKT today's row from
+# psxdata is still intraday (partial volume, moving close) and must not be stored.
+TODAY_FINAL_HOUR_PKT = 17
+
+# Supabase caps each response at 1,000 rows by default
+PAGE_SIZE = 1000
+UPSERT_CHUNK_SIZE = 100
+
+
+def now_pkt() -> datetime:
+    return datetime.now(PKT)
+
+
+def fetch_all(build_query: Callable) -> list[dict]:
+    """Page through a select query. build_query must return a fresh query builder each call."""
+    rows, start = [], 0
+    while True:
+        page = build_query().range(start, start + PAGE_SIZE - 1).execute().data
+        rows.extend(page)
+        if len(page) < PAGE_SIZE:
+            return rows
+        start += PAGE_SIZE
+
+
 def get_active_tickers() -> list[str]:
     response = supabase.table("halal_universe").select("ticker").eq("is_active", True).execute()
     return [row["ticker"] for row in response.data]
+
+
+def get_latest_trade_date(ticker: str) -> date | None:
+    resp = supabase.table("price_history").select("trade_date") \
+        .eq("ticker", ticker).order("trade_date", desc=True).limit(1).execute()
+    return date.fromisoformat(resp.data[0]["trade_date"]) if resp.data else None
+
+
+def _float(val):
+    # NaN is truthy, so `val or None` would not catch it. Storing NULL (not 0) keeps
+    # fake prices out of the indicator calculations downstream.
+    return float(val) if pd.notna(val) else None
+
+
+def _int(val):
+    return int(val) if pd.notna(val) else None
+
+
+def fetch_price_records(ticker: str, start: date) -> tuple[list[dict], int]:
+    """
+    Fetch finalised OHLCV rows on or after start as price_history records.
+    Returns (records, anomalous rows skipped).
+    """
+    # cache=False: psxdata's on-disk historical cache never expires locally
+    df = psxdata.stocks(ticker, start=start, cache=False)
+    if df is None or df.empty:
+        return [], 0
+
+    # psxdata returns `date` as a column (RangeIndex), lowercase OHLCV, and an is_anomaly flag
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+
+    now = now_pkt()
+    if now.hour < TODAY_FINAL_HOUR_PKT:
+        df = df[df["date"].dt.date < now.date()]
+
+    anomalous = df["is_anomaly"].fillna(False).astype(bool) if "is_anomaly" in df.columns \
+        else pd.Series(False, index=df.index)
+    df = df[~anomalous]
+
+    records = [
+        {
+            "ticker": ticker,
+            "trade_date": row["date"].strftime("%Y-%m-%d"),
+            "open_price":  _float(row.get("open")),
+            "high_price":  _float(row.get("high")),
+            "low_price":   _float(row.get("low")),
+            "close_price": _float(row.get("close")),
+            "volume":      _int(row.get("volume")),
+        }
+        for row in df.sort_values("date").to_dict("records")
+    ]
+    return records, int(anomalous.sum())
+
+
+def upsert_price_records(records: list[dict]):
+    # on_conflict targets the UNIQUE (ticker, trade_date) constraint, not the id
+    # primary key, so re-runs update existing rows instead of failing on duplicates.
+    for i in range(0, len(records), UPSERT_CHUNK_SIZE):
+        supabase.table("price_history").upsert(
+            records[i:i + UPSERT_CHUNK_SIZE], on_conflict="ticker,trade_date"
+        ).execute()
+
+
+def ingest_prices(tickers: list[str], start_for: Callable[[str], date]) -> tuple[date | None, list[str]]:
+    """
+    Fetch and upsert prices for each ticker from start_for(ticker) onwards.
+    Returns (newest trade_date stored, tickers that errored).
+    """
+    newest: date | None = None
+    failed: list[str] = []
+
+    for ticker in tickers:
+        try:
+            start = start_for(ticker)
+            print(f"Processing {ticker} (from {start})...")
+            records, skipped = fetch_price_records(ticker, start)
+            if skipped:
+                print(f"  Skipped {skipped} anomalous row(s).")
+            if not records:
+                print("  No new finalised rows.")
+                continue
+            upsert_price_records(records)
+            last = date.fromisoformat(records[-1]["trade_date"])
+            newest = last if newest is None else max(newest, last)
+            print(f"  Upserted {len(records)} row(s) through {last}.")
+        except Exception as e:
+            print(f"  Error processing {ticker}: {e}")
+            failed.append(ticker)
+
+    return newest, failed
 
 
 def price_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
@@ -96,11 +216,14 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     # --- Trending metrics ---
 
-    # volume_spike_ratio: today's volume relative to the 20-day average.
-    # NULL if avg_volume_20 is NULL or zero (guards against division by zero).
+    # volume_spike_ratio: today's volume relative to the PRIOR 20 days' average.
+    # Using the previous row's avg_volume_20 keeps today's own volume out of the
+    # baseline, which would otherwise dampen the very spike being measured.
+    # NULL if the baseline is NULL or zero (guards against division by zero).
+    prior_avg_volume = df["avg_volume_20"].shift(1)
     df["volume_spike_ratio"] = np.where(
-        (df["avg_volume_20"].notna()) & (df["avg_volume_20"] > 0),
-        df["volume"] / df["avg_volume_20"],
+        prior_avg_volume.notna() & (prior_avg_volume > 0),
+        df["volume"] / prior_avg_volume,
         None
     )
 
@@ -176,8 +299,5 @@ def compute_trending_score(trade_date: str, active_tickers: list[str]):
         {"ticker": row["ticker"], "trade_date": trade_date, "trending_score": float(row["trending_score"])}
         for _, row in scores_df.iterrows()
     ]
-    try:
-        supabase.table("technical_indicators").upsert(records, on_conflict="ticker,trade_date").execute()
-        print(f"  trending_score written for {len(records)} tickers on {trade_date}.")
-    except Exception as e:
-        print(f"  Error writing trending_score for {trade_date}: {e}")
+    supabase.table("technical_indicators").upsert(records, on_conflict="ticker,trade_date").execute()
+    print(f"  trending_score written for {len(records)} tickers on {trade_date}.")

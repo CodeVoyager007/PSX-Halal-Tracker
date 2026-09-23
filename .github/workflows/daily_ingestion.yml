@@ -8,31 +8,54 @@ on:
     - cron: '0 12 * * 1-5'
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
+# Never let a manual run overlap the scheduled one
+concurrency:
+  group: daily-ingestion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write # for the keep-alive step below
+
 jobs:
   ingest-data:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
+          python-version: '3.14'
           cache: 'pip'
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Run Tests
+        run: pytest -q
+
+      # Exits non-zero if any ticker fails or the newest stored price is stale
       - name: Run Daily Ingestion Script
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python scripts/ingest_daily_data.py
-        
+
+      # Still runs after a partial ingestion failure so the other tickers get
+      # indicators; the job stays failed either way.
       - name: Compute Daily Indicators
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        if: ${{ !cancelled() }}
         run: python scripts/compute_indicators_daily.py
+
+      # GitHub disables scheduled workflows after 60 days without repository
+      # activity. Re-enabling via the API on every run keeps the schedule alive.
+      - name: Keep Schedule Alive
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable daily_ingestion.yml --repo "$GITHUB_REPOSITORY"
