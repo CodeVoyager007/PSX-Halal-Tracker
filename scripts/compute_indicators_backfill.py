@@ -1,6 +1,8 @@
+import sys
 from datetime import datetime, timezone
 from common import (
     supabase,
+    fetch_all,
     get_active_tickers,
     price_rows_to_frame,
     process_dataframe,
@@ -9,39 +11,40 @@ from common import (
 )
 
 
-def main():
+def main() -> int:
     print(f"Starting indicators backfill at {datetime.now(timezone.utc).isoformat()}")
 
     tickers = get_active_tickers()
     if not tickers:
-        print("No active tickers found. Exiting.")
-        return
+        print("No active tickers found.")
+        return 1
 
     print(f"Found {len(tickers)} active tickers. Commencing indicator backfill...")
 
     # Track every trade_date we write so we can run trending_score once per date at the end
     dates_written: set = set()
+    failed: list[str] = []
 
     for ticker in tickers:
         print(f"Processing {ticker}...")
 
-        # Fetch the full 12-month price history already stored in price_history
-        history_response = supabase.table("price_history") \
-            .select("trade_date, open_price, high_price, low_price, close_price, volume") \
-            .eq("ticker", ticker) \
-            .order("trade_date", desc=False) \
-            .execute()
+        # Fetch the full stored price history, paging past Supabase's 1,000-row cap
+        history = fetch_all(lambda: supabase.table("price_history")
+                            .select("trade_date, open_price, high_price, low_price, close_price, volume")
+                            .eq("ticker", ticker)
+                            .order("trade_date", desc=False))
 
-        if not history_response.data:
+        if not history:
             print(f"  No price history found for {ticker}.")
             continue
 
-        df = price_rows_to_frame(history_response.data)
+        df = price_rows_to_frame(history)
 
         try:
             df = process_dataframe(df)
         except Exception as e:
             print(f"  Failed to compute indicators for {ticker}: {e}")
+            failed.append(ticker)
             continue
 
         records_to_upsert = [to_indicator_record(ticker, row) for _, row in df.iterrows()]
@@ -58,16 +61,26 @@ def main():
                 dates_written.update(r["trade_date"] for r in chunk)
             except Exception as e:
                 print(f"  Error upserting chunk for {ticker}: {e}")
+                failed.append(ticker)
 
         print(f"  Upserted {upserted_count} indicator records for {ticker}.")
 
     # Second pass: compute trending_score for every date we touched
     print(f"\nComputing trending_score for {len(dates_written)} date(s)...")
     for trade_date in sorted(dates_written):
-        compute_trending_score(trade_date, tickers)
+        try:
+            compute_trending_score(trade_date, tickers)
+        except Exception as e:
+            print(f"  Error writing trending_score for {trade_date}: {e}")
+            failed.append(f"trending_score {trade_date}")
+
+    if failed:
+        print(f"\nERROR: {len(failed)} failure(s): {', '.join(sorted(set(failed)))}")
+        return 1
 
     print("Indicator backfill completed.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

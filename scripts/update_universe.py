@@ -1,3 +1,4 @@
+import sys
 import psxdata
 import pandas as pd
 from datetime import datetime
@@ -43,7 +44,7 @@ def fetch_constituents() -> tuple[list[dict], bool]:
         return [{"ticker": t} for t in MANUAL_KMI_30], False
 
 
-def main():
+def main() -> int:
     print("Updating Halal Universe (KMI-30)...")
     records, is_live = fetch_constituents()
     print(f"Total tickers to process: {len(records)}")
@@ -52,6 +53,7 @@ def main():
 
     existing_resp = supabase.table("halal_universe").select("ticker, is_active").execute()
     existing = {row["ticker"]: row for row in existing_resp.data}
+    failed: list[str] = []
 
     # 1. Upsert current constituents
     for record in records:
@@ -72,6 +74,7 @@ def main():
             print(f"  Added/Updated {ticker} in halal_universe.")
         except Exception as e:
             print(f"  Failed to update {ticker}: {e}")
+            failed.append(ticker)
 
     # 2. Soft-delete tickers that have left the index
     current = {r["ticker"] for r in records}
@@ -94,9 +97,15 @@ def main():
                 print(f"  Deactivated {len(removed)} ticker(s) no longer in KMI-30: {', '.join(removed)}")
             except Exception as e:
                 print(f"  Failed to deactivate removed tickers: {e}")
+                failed.append("deactivation")
+
+    if failed:
+        print(f"ERROR: {len(failed)} failure(s): {', '.join(failed)}")
+        return 1
 
     print("Universe update complete.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

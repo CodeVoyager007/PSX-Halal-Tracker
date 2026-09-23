@@ -1,5 +1,7 @@
+-- Safe to re-run: tables use IF NOT EXISTS, columns added later use ADD COLUMN IF NOT EXISTS.
+
 -- Table 1: halal_universe (Manually refreshed twice a year)
-CREATE TABLE halal_universe (
+CREATE TABLE IF NOT EXISTS halal_universe (
     ticker VARCHAR(10) PRIMARY KEY,
     company_name VARCHAR(255),
     sector VARCHAR(100),
@@ -7,11 +9,12 @@ CREATE TABLE halal_universe (
     is_kmi_all_share BOOLEAN DEFAULT TRUE,
     is_active BOOLEAN DEFAULT TRUE,    -- Marks if still in the halal universe
     added_date DATE DEFAULT CURRENT_DATE,
-    removed_date DATE                  -- Set when a ticker is removed, instead of hard-deleting
+    removed_date DATE,                 -- Set when a ticker is removed, instead of hard-deleting
+    market_cap_m NUMERIC               -- PKR millions, from psxdata KMI30 listing
 );
 
 -- Table 2: price_history (Daily OHLCV per PSX ticker)
-CREATE TABLE price_history (
+CREATE TABLE IF NOT EXISTS price_history (
     id SERIAL PRIMARY KEY,
     ticker VARCHAR(10) REFERENCES halal_universe(ticker),
     trade_date DATE NOT NULL,
@@ -24,7 +27,7 @@ CREATE TABLE price_history (
 );
 
 -- Table 3: portfolio (Current holdings)
-CREATE TABLE portfolio (
+CREATE TABLE IF NOT EXISTS portfolio (
     id SERIAL PRIMARY KEY,
     ticker VARCHAR(10) REFERENCES halal_universe(ticker),
     quantity NUMERIC(15, 4) NOT NULL,
@@ -34,7 +37,7 @@ CREATE TABLE portfolio (
 );
 
 -- Table 4: trade_journal (Logged entries/exits with reasoning)
-CREATE TABLE trade_journal (
+CREATE TABLE IF NOT EXISTS trade_journal (
     id SERIAL PRIMARY KEY,
     ticker VARCHAR(10) REFERENCES halal_universe(ticker),
     trade_type VARCHAR(10) CHECK (trade_type IN ('BUY', 'SELL')),
@@ -47,7 +50,7 @@ CREATE TABLE trade_journal (
 );
 
 -- Table 5: technical_indicators (Daily indicators computed natively)
-CREATE TABLE technical_indicators (
+CREATE TABLE IF NOT EXISTS technical_indicators (
     id SERIAL PRIMARY KEY,
     ticker VARCHAR(10) REFERENCES halal_universe(ticker),
     trade_date DATE NOT NULL,
@@ -78,7 +81,7 @@ CREATE TABLE technical_indicators (
     avg_volume_20 BIGINT,
 
     -- Trending metrics (computed daily across all active tickers)
-    volume_spike_ratio NUMERIC(10, 4),   -- today's volume / avg_volume_20
+    volume_spike_ratio NUMERIC(10, 4),   -- today's volume / previous day's avg_volume_20
     price_change_5d_pct NUMERIC(10, 4),  -- 5-trading-day price momentum (%)
     -- trending_score = volume_rank + price_rank (both ranked descending, so lower score = more trending)
     trending_score NUMERIC(10, 4),
@@ -87,8 +90,7 @@ CREATE TABLE technical_indicators (
     UNIQUE(ticker, trade_date)
 );
 
--- ALTER statements for databases already initialised without the new columns.
--- Safe to re-run: Postgres will raise "column already exists" which can be ignored.
+-- Columns added after the first release, for databases created before them.
 ALTER TABLE halal_universe ADD COLUMN IF NOT EXISTS market_cap_m NUMERIC;
 
 ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS volume_spike_ratio NUMERIC(10, 4);
@@ -96,7 +98,7 @@ ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS price_change_5d_pct NU
 ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS trending_score NUMERIC(10, 4);
 
 -- View 1: Top 20 active halal tickers by market capitalisation
-CREATE OR REPLACE VIEW top_20_by_market_cap AS
+CREATE OR REPLACE VIEW top_20_by_market_cap WITH (security_invoker = true) AS
 SELECT ticker, company_name, sector, market_cap_m
 FROM halal_universe
 WHERE is_active = TRUE AND market_cap_m IS NOT NULL
@@ -107,7 +109,7 @@ LIMIT 20;
 -- trending_score = volume_rank + price_rank (both descending), so ORDER BY ASC surfaces the most trending.
 -- close_price is JOINed from price_history on BOTH ticker AND trade_date — joining on ticker alone
 -- would produce a cross-product of every historical date, not the matching row.
-CREATE OR REPLACE VIEW trending_stocks AS
+CREATE OR REPLACE VIEW trending_stocks WITH (security_invoker = true) AS
 SELECT
     ti.ticker,
     hu.company_name,
@@ -127,3 +129,12 @@ WHERE
     AND ti.trending_score IS NOT NULL
 ORDER BY ti.trending_score ASC
 LIMIT 20;
+
+-- Row Level Security: with RLS on and no policies, the public anon key can
+-- neither read nor write any table. The pipeline uses the service_role key,
+-- which bypasses RLS. Add explicit SELECT policies when a frontend needs reads.
+ALTER TABLE halal_universe       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_history        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE portfolio            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trade_journal        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE technical_indicators ENABLE ROW LEVEL SECURITY;
