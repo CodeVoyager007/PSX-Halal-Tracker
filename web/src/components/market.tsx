@@ -57,3 +57,15 @@ export function Sparkline({
     </svg>
   );
 }
+
+/**
+ * Diverging fill for heatmap tiles: gain or loss hue mixed into the surface by
+ * magnitude, capped so text tokens stay readable on top. Direction is also
+ * carried by the signed label, never by colour alone.
+ */
+export function heatColor(v: number | null, full = 2.5) {
+  if (v === null) return "var(--surface-2)";
+  const strength = Math.min(1, Math.abs(v) / full);
+  const pct = Math.round(10 + strength * 35);
+  return `color-mix(in oklab, ${v >= 0 ? "var(--gain)" : "var(--loss)"} ${pct}%, var(--surface-2))`;
+}

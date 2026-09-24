@@ -82,8 +82,18 @@ def test_macd_and_bbands_mapped_by_name():
 
 
 def test_missing_pandas_ta_column_fails_loudly():
+    index = pd.RangeIndex(100)
     with pytest.raises(RuntimeError):
-        common._select_by_prefix(pd.DataFrame(columns=["X_1"]), common.MACD_COLUMNS)
+        common._select_by_prefix(pd.DataFrame(columns=["X_1"]), common.MACD_COLUMNS, index, min_rows=35)
+
+
+def test_short_history_gets_null_indicators_instead_of_failing():
+    # A new listing with 20 sessions: too short for MACD (needs 35 rows)
+    rows = synthetic_prices(20)
+    df = common.process_dataframe(common.price_rows_to_frame(rows))
+    records = [common.to_indicator_record("NEW", r) for _, r in df.iterrows()]
+    assert all(r["macd"] is None and r["macd_signal"] is None for r in records)
+    assert records[-1]["sma_20"] is not None
 
 
 def test_volume_spike_uses_prior_average():
@@ -147,8 +157,25 @@ def test_fetch_price_records(monkeypatch, hour, expected_dates):
     json.dumps(records)
 
 
+def test_fetch_retries_transient_failures(monkeypatch):
+    sleeps, calls = [], []
+    monkeypatch.setattr(common.time, "sleep", sleeps.append)
+
+    def flaky(ticker, start):
+        calls.append(ticker)
+        if len(calls) == 1:
+            raise ConnectionResetError("forcibly closed")
+        return [{"ticker": ticker, "trade_date": "2026-01-05"}], 0
+
+    monkeypatch.setattr(common, "fetch_price_records", flaky)
+    records, _ = common.fetch_with_retry("OK", date(2026, 1, 1))
+    assert len(records) == 1 and len(calls) == 2
+    assert sleeps == [common.PSX_RETRY_DELAYS_SECONDS[0]]
+
+
 def test_ingest_prices_reports_failures_without_stopping(monkeypatch):
     upserts = []
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
     monkeypatch.setattr(common, "upsert_price_records", upserts.append)
 
     def fake_fetch(ticker, start):

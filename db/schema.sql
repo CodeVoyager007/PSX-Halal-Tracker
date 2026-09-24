@@ -229,6 +229,11 @@ CREATE TRIGGER on_auth_user_created
     AFTER INSERT OR UPDATE OF email ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.sync_profile();
 
+-- Accounts created before the trigger existed get their profile here
+INSERT INTO public.profiles (id, email)
+SELECT id, email FROM auth.users WHERE email IS NOT NULL
+ON CONFLICT (id) DO NOTHING;
+
 -- Cap each watchlist at 50 companies to keep digests readable and the email
 -- quota predictable. A trigger rather than an RLS check: a policy on
 -- watchlists cannot query watchlists without infinite recursion.
@@ -257,6 +262,15 @@ LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
 $$;
 REVOKE ALL ON FUNCTION public.unsubscribe_digest(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.unsubscribe_digest(UUID) TO anon, authenticated;
+
+-- Trigger functions must not be callable through the API
+REVOKE ALL ON FUNCTION public.sync_profile() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.enforce_watchlist_limit() FROM PUBLIC, anon, authenticated;
+
+-- Cover the ticker foreign keys (e.g. "who follows OGDC", and FK checks on universe changes)
+CREATE INDEX IF NOT EXISTS watchlists_ticker_idx ON watchlists(ticker);
+CREATE INDEX IF NOT EXISTS portfolio_ticker_idx ON portfolio(ticker);
+CREATE INDEX IF NOT EXISTS trade_journal_ticker_idx ON trade_journal(ticker);
 
 -- =====================================================================
 -- Row Level Security

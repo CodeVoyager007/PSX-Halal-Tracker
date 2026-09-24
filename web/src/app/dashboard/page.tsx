@@ -6,6 +6,7 @@ import { fmtDate, fmtNum, fmtPrice, toNum } from "@/lib/format";
 import type { Profile, SnapshotRow } from "@/lib/types";
 import { ChangePill, TickerBadge } from "@/components/market";
 import AddStock from "./add-stock";
+import MarketOverview from "./market-overview";
 import { addTickerForm, removeTicker, updateDigest } from "./actions";
 
 export const metadata = { title: "Dashboard · PSX Halal Tracker" };
@@ -72,13 +73,14 @@ export default async function Dashboard() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 px-4 py-10 sm:px-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Your watchlist</h1>
-          <p className="mt-1 text-sm text-secondary">
-            Closing prices for {fmtDate(marketDate)}. Updated after each trading day.
-          </p>
-        </div>
+      <div className="relative isolate overflow-hidden rounded-3xl bg-gradient-to-br from-[#065f46] via-[#047857] to-[#0f766e] px-6 py-8 text-white shadow-lift sm:px-8">
+        <div className="pattern-star absolute inset-0 -z-10 opacity-60" aria-hidden="true" />
+        <div className="absolute -right-16 -top-20 -z-10 size-64 rounded-full bg-[#e0b35c]/30 blur-3xl" aria-hidden="true" />
+        <p className="text-sm text-white/75">Assalam-o-Alaikum</p>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Your halal watchlist</h1>
+        <p className="mt-2 text-sm text-white/80">
+          Closing prices for {fmtDate(marketDate)} · updated after each trading day
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -119,17 +121,18 @@ export default async function Dashboard() {
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+          <div className="relative overflow-x-auto">
+            {/* relative keeps the absolutely positioned sr-only header inside this scroll area */}
+            <table className="w-full text-sm md:min-w-[720px]">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-muted">
-                  <th className="px-5 py-3 font-medium">Company</th>
-                  <th className="px-5 py-3 text-right font-medium">Close (PKR)</th>
-                  <th className="px-5 py-3 text-right font-medium">1 day</th>
-                  <th className="px-5 py-3 text-right font-medium">5 days</th>
-                  <th className="px-5 py-3 text-right font-medium">RSI 14</th>
-                  <th className="px-5 py-3 text-right font-medium">Volume vs avg</th>
-                  <th className="px-5 py-3">
+                  <th className="px-4 py-3 font-medium sm:px-5">Company</th>
+                  <th className="px-2 py-3 text-right font-medium sm:px-5">Close</th>
+                  <th className="px-2 py-3 text-right font-medium sm:px-5">1 day</th>
+                  <th className="hidden px-5 py-3 text-right font-medium md:table-cell">5 days</th>
+                  <th className="hidden px-5 py-3 text-right font-medium md:table-cell">RSI 14</th>
+                  <th className="hidden px-5 py-3 text-right font-medium md:table-cell">Volume vs avg</th>
+                  <th className="px-2 py-3 sm:px-5">
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -140,29 +143,31 @@ export default async function Dashboard() {
                   const stale = r.trade_date && marketDate && r.trade_date < marketDate;
                   return (
                     <tr key={r.ticker} className="group transition hover:bg-surface-2/60">
-                      <td className="px-5 py-3.5">
+                      <td className="px-4 py-3.5 sm:px-5">
                         <Link href={`/stocks/${r.ticker}`} className="flex items-center gap-3">
-                          <TickerBadge ticker={r.ticker} />
+                          <span className="hidden sm:block">
+                            <TickerBadge ticker={r.ticker} />
+                          </span>
                           <span className="min-w-0">
                             <span className="flex items-center gap-1 font-semibold group-hover:text-brand">
                               {r.ticker}
                               <ChevronRight className="size-3.5 opacity-0 transition group-hover:opacity-100" />
                             </span>
-                            <span className="block max-w-[16rem] truncate text-xs text-muted">
+                            <span className="block max-w-[7.5rem] truncate text-xs text-muted sm:max-w-[16rem]">
                               {stale ? `Last traded ${fmtDate(r.trade_date)}` : r.company_name}
                             </span>
                           </span>
                         </Link>
                       </td>
-                      <td className="px-5 py-3.5 text-right font-medium tabular-nums">{fmtPrice(r.close_price)}</td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-2 py-3.5 text-right font-medium tabular-nums sm:px-5">{fmtPrice(r.close_price)}</td>
+                      <td className="px-2 py-3.5 text-right sm:px-5">
                         <ChangePill value={r.change_1d_pct} />
                       </td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="hidden px-5 py-3.5 text-right md:table-cell">
                         <ChangePill value={r.price_change_5d_pct} />
                       </td>
-                      <td className="px-5 py-3.5 text-right tabular-nums text-secondary">{fmtNum(r.rsi_14)}</td>
-                      <td className="px-5 py-3.5 text-right tabular-nums">
+                      <td className="hidden px-5 py-3.5 text-right tabular-nums text-secondary md:table-cell">{fmtNum(r.rsi_14)}</td>
+                      <td className="hidden px-5 py-3.5 text-right tabular-nums md:table-cell">
                         {spike === null ? (
                           <span className="text-muted">—</span>
                         ) : spike >= 2 ? (
@@ -173,7 +178,7 @@ export default async function Dashboard() {
                           <span className="text-secondary">{fmtNum(spike, 1)}×</span>
                         )}
                       </td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-2 py-3.5 text-right sm:px-5">
                         <form action={removeTicker}>
                           <input type="hidden" name="ticker" value={r.ticker} />
                           <button
@@ -193,6 +198,8 @@ export default async function Dashboard() {
           </div>
         )}
       </section>
+
+      <MarketOverview rows={all} marketDate={marketDate} watched={watched} />
 
       <section className="rounded-2xl border border-line bg-surface p-6 shadow-card">
         <div className="flex items-start gap-4">

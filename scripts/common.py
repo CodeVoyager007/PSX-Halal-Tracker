@@ -4,6 +4,7 @@ Both indicator scripts import from here so the daily and backfill paths
 cannot drift apart.
 """
 import os
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 import numpy as np
@@ -52,6 +53,11 @@ TODAY_FINAL_HOUR_PKT = 17
 # Supabase caps each response at 1,000 rows by default
 PAGE_SIZE = 1000
 UPSERT_CHUNK_SIZE = 100
+
+# PSX's portal resets connections when hit with ~300 back-to-back requests.
+# Pace requests and retry transient failures with backoff.
+PSX_REQUEST_PAUSE_SECONDS = 0.5
+PSX_RETRY_DELAYS_SECONDS = (5, 20)
 
 
 def now_pkt() -> datetime:
@@ -127,6 +133,18 @@ def fetch_price_records(ticker: str, start: date) -> tuple[list[dict], int]:
     return records, int(anomalous.sum())
 
 
+def fetch_with_retry(ticker: str, start: date) -> tuple[list[dict], int]:
+    """fetch_price_records, retrying connection resets and timeouts with backoff."""
+    for attempt, delay in enumerate((*PSX_RETRY_DELAYS_SECONDS, None), start=1):
+        try:
+            return fetch_price_records(ticker, start)
+        except Exception as e:
+            if delay is None:
+                raise
+            print(f"  Attempt {attempt} failed ({e}); retrying in {delay}s.")
+            time.sleep(delay)
+
+
 def upsert_price_records(records: list[dict]):
     # on_conflict targets the UNIQUE (ticker, trade_date) constraint, not the id
     # primary key, so re-runs update existing rows instead of failing on duplicates.
@@ -144,11 +162,13 @@ def ingest_prices(tickers: list[str], start_for: Callable[[str], date]) -> tuple
     newest: date | None = None
     failed: list[str] = []
 
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
+        if i:
+            time.sleep(PSX_REQUEST_PAUSE_SECONDS)
         try:
             start = start_for(ticker)
             print(f"Processing {ticker} (from {start})...")
-            records, skipped = fetch_price_records(ticker, start)
+            records, skipped = fetch_with_retry(ticker, start)
             if skipped:
                 print(f"  Skipped {skipped} anomalous row(s).")
             if not records:
@@ -178,7 +198,18 @@ def price_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     return df
 
 
-def _select_by_prefix(result: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
+def _select_by_prefix(result: pd.DataFrame | None, mapping: dict[str, str],
+                      index: pd.Index, min_rows: int) -> pd.DataFrame:
+    """
+    Map pandas-ta output columns to schema names. With too little history for
+    the indicator, pandas-ta returns nothing usable; that yields NULL columns.
+    With enough history, a missing column is a library change and raises.
+    """
+    has_output = result is not None and any(
+        c.startswith(prefix) for c in result.columns for prefix in mapping
+    )
+    if not has_output and len(index) < min_rows:
+        return pd.DataFrame({target: np.nan for target in mapping.values()}, index=index)
     renamed = {}
     for prefix, target in mapping.items():
         matches = [c for c in result.columns if c.startswith(prefix)]
@@ -209,7 +240,8 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # Multi-output indicators: map by column name (see MACD_COLUMNS / BBANDS_COLUMNS)
     macd = df.ta.macd(fast=12, slow=26, signal=9, append=False)
     bbands = df.ta.bbands(length=20, std=2, append=False)
-    df = df.join(_select_by_prefix(macd, MACD_COLUMNS)).join(_select_by_prefix(bbands, BBANDS_COLUMNS))
+    df = df.join(_select_by_prefix(macd, MACD_COLUMNS, df.index, min_rows=26 + 9))
+    df = df.join(_select_by_prefix(bbands, BBANDS_COLUMNS, df.index, min_rows=20))
 
     # Average volume (20-day SMA over the volume series)
     df.ta.sma(close=df["volume"], length=20, append=True, col_names=("avg_volume_20",))
