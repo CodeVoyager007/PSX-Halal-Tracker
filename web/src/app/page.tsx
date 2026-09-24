@@ -9,10 +9,12 @@ import {
   Clock,
   Lock,
   Mail,
+  Plus,
+  Search,
   ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { ChangePill, Sparkline, TickerBadge, heatColor } from "@/components/market";
+import { ChangePill, Sparkline, TickerBadge } from "@/components/market";
 import { FillArt } from "@/components/art";
 
 // Illustrative figures for the marketing previews only; not live prices.
@@ -29,8 +31,12 @@ const TAPE: [string, number][] = [
   ["MLCF", 0.73], ["SEARL", -0.21], ["PAEL", 2.15], ["NML", 0.38],
 ];
 
-// Illustrative sector moves for the heatmap tile (percent)
-const HEAT = [2.1, 0.8, -0.4, 1.3, -1.6, 0.2, 0.9, -0.7, 1.8, -0.2, 0.5, -1.1, 1.4, 0.1, -0.9, 0.6, 2.4, -0.3, 0.7, -1.4];
+// Search preview rows: the three largest cement companies in the KMI All-Share index
+const SEARCH_PREVIEW: [string, string][] = [
+  ["MLCF", "Maple Leaf Cement Factory"],
+  ["DGKC", "D.G. Khan Cement Company"],
+  ["KOHC", "Kohat Cement Company"],
+];
 
 const FAQ = [
   [
@@ -303,14 +309,31 @@ export default async function Home() {
               </div>
             </article>
 
-            {/* Universe size + heatmap */}
+            {/* Universe size + a search preview */}
             <article className="flex flex-col rounded-3xl border border-line bg-surface p-6 shadow-card md:col-span-2">
-              <div className="text-4xl font-semibold tracking-tight">300+</div>
+              <div className="font-display text-4xl font-medium">300+</div>
               <p className="mt-1 text-sm text-secondary">halal companies, searchable by name, ticker or sector</p>
-              <div className="mt-auto grid grid-cols-5 gap-1 pt-5" aria-hidden="true">
-                {HEAT.map((v, i) => (
-                  <span key={i} className="aspect-square rounded-md" style={{ background: heatColor(v) }} />
-                ))}
+              <div className="mt-auto pt-5" aria-hidden="true">
+                <div className="flex items-center gap-2 rounded-xl border border-brand/40 bg-surface-2 px-3 py-2.5 text-sm ring-4 ring-brand/10">
+                  <Search className="size-4 text-muted" />
+                  <span>cement</span>
+                  <span className="-ml-1.5 h-4 w-px animate-pulse bg-brand" />
+                </div>
+                <ul className="mt-2 space-y-1">
+                  {SEARCH_PREVIEW.map(([ticker, name], i) => (
+                    <li
+                      key={ticker}
+                      className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 ${i === 0 ? "bg-brand-soft" : ""}`}
+                    >
+                      <TickerBadge ticker={ticker} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold">{ticker}</span>
+                        <span className="block truncate text-xs text-muted">{name}</span>
+                      </span>
+                      <Plus className={`size-4 shrink-0 ${i === 0 ? "text-brand" : "text-muted"}`} />
+                    </li>
+                  ))}
+                </ul>
               </div>
             </article>
 
