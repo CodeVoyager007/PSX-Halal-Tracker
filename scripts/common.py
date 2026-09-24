@@ -246,6 +246,12 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # Average volume (20-day SMA over the volume series)
     df.ta.sma(close=df["volume"], length=20, append=True, col_names=("avg_volume_20",))
 
+    # pandas-ta appends nothing when history is shorter than the window (new
+    # listings), so make sure every column exists and is NULL in that case
+    for col in ("sma_20", "sma_50", "sma_200", "ema_12", "ema_26", "rsi_14", "avg_volume_20"):
+        if col not in df.columns:
+            df[col] = np.nan
+
     # --- Trending metrics ---
 
     # volume_spike_ratio: today's volume relative to the PRIOR 20 days' average.

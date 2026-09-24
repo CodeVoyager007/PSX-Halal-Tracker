@@ -28,7 +28,7 @@ export default function Logo() {
     <Link href="/" className="flex items-center gap-2.5" aria-label="PSX Halal Tracker home">
       <LogoMark />
       <span className="leading-tight">
-        <span className="block text-[15px] font-semibold tracking-tight">PSX Halal Tracker</span>
+        <span className="block whitespace-nowrap text-[15px] font-semibold tracking-tight">PSX Halal Tracker</span>
         <span className="hidden text-[11px] text-muted sm:block">Shariah-screened stock alerts</span>
       </span>
     </Link>

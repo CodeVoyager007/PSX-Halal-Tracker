@@ -51,12 +51,12 @@ export default async function SiteHeader() {
                 </a>
               ))}
             </div>
-            <Link href="/login" className="rounded-lg px-3 py-2 font-medium text-secondary hover:text-primary">
+            <Link href="/login" className="hidden whitespace-nowrap rounded-lg px-3 py-2 font-medium text-secondary hover:text-primary sm:block">
               Sign in
             </Link>
             <Link
               href="/login"
-              className="rounded-lg bg-brand px-4 py-2 font-medium text-brand-ink shadow-card transition hover:bg-brand-strong"
+              className="whitespace-nowrap rounded-lg bg-brand px-4 py-2 font-medium text-brand-ink shadow-card transition hover:bg-brand-strong"
             >
               Get started
             </Link>

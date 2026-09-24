@@ -1,7 +1,7 @@
 import { CircleCheck, ShieldCheck } from "lucide-react";
 import { safeNext } from "@/lib/format";
 import { LogoMark } from "@/components/logo";
-import { FillPhoto, PhotoCredit } from "@/components/photo";
+import { FillArt } from "@/components/art";
 import LoginForm from "./login-form";
 
 export const metadata = { title: "Sign in · PSX Halal Tracker" };
@@ -15,14 +15,14 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-stretch gap-8 px-4 py-10 sm:px-6 lg:grid-cols-2">
       {/* Photo panel */}
       <div className="relative isolate hidden overflow-hidden rounded-3xl p-10 text-white lg:flex lg:flex-col lg:justify-end">
-        <FillPhoto photo="mosque" sizes="50vw" preload className="-z-20" />
+        <FillArt art="arches" sizes="50vw" preload className="-z-20" />
         <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#04130d] via-[#04130d]/70 to-[#04130d]/10" aria-hidden="true" />
         <div className="pattern-star absolute inset-0 -z-10 opacity-30 [mask-image:linear-gradient(to_top,black,transparent_70%)]" aria-hidden="true" />
         <LogoMark className="size-12" />
         <h1 className="mt-6 text-4xl font-semibold leading-tight tracking-tight">
           Follow halal PSX stocks
           <br />
-          <span className="text-[#6ee7b7]">the calm way.</span>
+          <span className="font-display-italic text-[#e0b35c]">the calm way.</span>
         </h1>
         <ul className="mt-6 space-y-3 text-white/85">
           {[
@@ -35,7 +35,6 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             </li>
           ))}
         </ul>
-        <PhotoCredit photo="mosque" className="absolute right-4 top-4" />
       </div>
 
       {/* Form */}

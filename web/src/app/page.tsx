@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ChangePill, Sparkline, TickerBadge, heatColor } from "@/components/market";
-import { FillPhoto, PhotoCredit } from "@/components/photo";
+import { FillArt } from "@/components/art";
 
 // Illustrative figures for the marketing previews only; not live prices.
 const PREVIEW = [
@@ -196,22 +196,24 @@ export default async function Home() {
 
   return (
     <>
-      {/* Hero: always dark, over a photo of Karachi at night */}
-      <section className="relative isolate overflow-hidden bg-[#050b08] text-white">
-        <FillPhoto photo="karachiNight" sizes="100vw" preload className="-z-20 opacity-70" />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#050b08] via-[#050b08]/85 to-[#050b08]/30" aria-hidden="true" />
-        <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#050b08] via-transparent to-transparent" aria-hidden="true" />
-        <div className="pattern-star absolute inset-0 -z-10 opacity-40 [mask-image:linear-gradient(to_right,black,transparent_60%)]" aria-hidden="true" />
+      {/* Hero: always dark; commissioned artwork of the Karachi skyline with a rising gold line */}
+      <section className="relative isolate flex min-h-[88vh] items-center overflow-hidden bg-[#04130d] text-white">
+        <FillArt art="hero" sizes="100vw" preload className="-z-20 object-[70%_center]" />
+        <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#04130d]/95 via-[#04130d]/55 to-transparent" aria-hidden="true" />
+        <div className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-gradient-to-t from-page to-transparent" aria-hidden="true" />
 
-        <div className="mx-auto grid max-w-6xl items-center gap-14 px-4 pb-32 pt-20 sm:px-6 lg:grid-cols-[1.05fr_1fr] lg:pb-36 lg:pt-28">
-          <div>
+        <div className="mx-auto w-full max-w-6xl px-4 pb-40 pt-20 sm:px-6 lg:pt-24">
+          <div className="max-w-2xl">
+            <span className="font-arabic mb-6 block text-5xl leading-tight text-[#e0b35c] drop-shadow-[0_2px_12px_rgba(224,179,92,0.35)] sm:text-6xl" lang="ar" aria-hidden="true">
+              حلال
+            </span>
             <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur">
               <ShieldCheck className="size-3.5 text-[#6ee7b7]" /> Based on the official KMI All-Share index
             </span>
-            <h1 className="mt-6 text-4xl font-semibold leading-[1.06] tracking-tight sm:text-5xl lg:text-6xl">
+            <h1 className="mt-5 text-5xl font-medium leading-[1.02] sm:text-6xl lg:text-7xl">
               Halal PSX investing,
               <br />
-              <span className="bg-gradient-to-r from-[#6ee7b7] to-[#e0b35c] bg-clip-text text-transparent">
+              <span className="font-display-italic bg-gradient-to-r from-[#6ee7b7] via-[#b9e3b0] to-[#e0b35c] bg-clip-text pr-2 text-transparent">
                 minus the noise.
               </span>
             </h1>
@@ -241,15 +243,32 @@ export default async function Home() {
               ].map(([v, l]) => (
                 <div key={l}>
                   <dt className="sr-only">{l}</dt>
-                  <dd className="text-2xl font-semibold tracking-tight">{v}</dd>
+                  <dd className="font-display text-3xl font-medium">{v}</dd>
                   <dd className="text-xs text-white/60">{l}</dd>
                 </div>
               ))}
             </dl>
           </div>
-          <ProductPreview />
         </div>
-        <PhotoCredit photo="karachiNight" className="absolute bottom-3 right-4" />
+      </section>
+
+      {/* Product preview, lifted over the hero's lower edge */}
+      <section className="relative z-10 -mt-32">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-20 sm:px-6 sm:pb-32 lg:grid-cols-[1fr_1.1fr]">
+          <div className="order-2 lg:order-1">
+            <p className="text-sm font-semibold text-brand">Your watchlist, at a glance</p>
+            <h2 className="mt-2 text-3xl font-medium sm:text-4xl">
+              Every company you follow, <span className="font-display-italic text-brand">in one calm view.</span>
+            </h2>
+            <p className="mt-4 max-w-md leading-relaxed text-secondary">
+              Closing prices, daily and weekly moves, and a quiet flag when something is unusual. The same view
+              arrives in your inbox after the bell.
+            </p>
+          </div>
+          <div className="order-1 lg:order-2">
+            <ProductPreview />
+          </div>
+        </div>
       </section>
 
       <TickerTape />
@@ -265,7 +284,7 @@ export default async function Home() {
           <div className="mt-12 grid auto-rows-[minmax(13rem,auto)] gap-4 md:grid-cols-6">
             {/* Shariah universe: photo tile */}
             <article className="relative isolate flex min-h-[26rem] flex-col justify-end overflow-hidden rounded-3xl p-7 text-white md:col-span-4 md:row-span-2">
-              <FillPhoto photo="mosaic" sizes="(min-width: 768px) 66vw, 100vw" className="-z-20" />
+              <FillArt art="shariah" sizes="(min-width: 768px) 66vw, 100vw" className="-z-20" />
               <div className="absolute inset-0 -z-10 bg-gradient-to-t from-black/95 via-black/60 to-black/0" aria-hidden="true" />
               <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-medium backdrop-blur">
                 <ShieldCheck className="size-3.5" /> Shariah-screened
@@ -282,7 +301,6 @@ export default async function Home() {
                   </span>
                 ))}
               </div>
-              <PhotoCredit photo="mosaic" className="absolute right-4 top-4" />
             </article>
 
             {/* Universe size + heatmap */}
@@ -298,14 +316,13 @@ export default async function Home() {
 
             {/* Email: photo tile */}
             <article className="relative isolate flex min-h-[13rem] flex-col justify-end overflow-hidden rounded-3xl p-6 text-white md:col-span-2">
-              <FillPhoto photo="phoneCoffee" sizes="(min-width: 768px) 33vw, 100vw" className="-z-20" />
+              <FillArt art="email" sizes="(min-width: 768px) 33vw, 100vw" className="-z-20 object-[50%_35%]" />
               <div className="absolute inset-0 -z-10 bg-gradient-to-t from-black/85 via-black/30 to-transparent" aria-hidden="true" />
               <span className="absolute left-5 top-5 flex items-center gap-2 rounded-xl bg-white/90 px-3 py-2 text-xs font-medium text-[#0c1512] shadow-lg">
                 <Mail className="size-3.5 text-[#047857]" /> Daily digest · 5:04 PM
               </span>
               <h3 className="text-lg font-semibold">One email after the close</h3>
               <p className="mt-1 text-sm text-white/80">Daily, or a Friday wrap-up. No app to open.</p>
-              <PhotoCredit photo="phoneCoffee" className="absolute right-3 top-3" />
             </article>
 
             {/* Charts */}
@@ -385,8 +402,7 @@ export default async function Home() {
       <section>
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-24 sm:px-6 lg:grid-cols-2">
           <div className="relative aspect-[4/3] overflow-hidden rounded-3xl shadow-lift">
-            <FillPhoto photo="karachiSunset" sizes="(min-width: 1024px) 50vw, 100vw" />
-            <PhotoCredit photo="karachiSunset" className="absolute bottom-3 right-3" />
+            <FillArt art="city" sizes="(min-width: 1024px) 50vw, 100vw" />
           </div>
           <div>
             <p className="text-sm font-semibold text-brand">Made for Pakistan</p>

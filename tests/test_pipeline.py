@@ -96,6 +96,15 @@ def test_short_history_gets_null_indicators_instead_of_failing():
     assert records[-1]["sma_20"] is not None
 
 
+def test_very_short_history_gets_null_averages():
+    # 10 sessions: shorter than even the 20-day windows
+    df = common.process_dataframe(common.price_rows_to_frame(synthetic_prices(10)))
+    last = common.to_indicator_record("NEW", df.iloc[-1])
+    assert last["sma_20"] is None and last["avg_volume_20"] is None and last["volume_spike_ratio"] is None
+    assert last["price_change_5d_pct"] is not None
+    json.dumps(last)
+
+
 def test_volume_spike_uses_prior_average():
     rows = synthetic_prices(40)
     for r in rows:
