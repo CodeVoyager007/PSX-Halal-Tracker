@@ -263,6 +263,19 @@ $$;
 REVOKE ALL ON FUNCTION public.unsubscribe_digest(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.unsubscribe_digest(UUID) TO anon, authenticated;
 
+-- Public directory of the halal universe for the landing-page search. Exposes
+-- only the index constituent list (ticker, name, sector), never prices.
+CREATE OR REPLACE FUNCTION public.company_directory()
+RETURNS TABLE (ticker VARCHAR, company_name VARCHAR, sector VARCHAR, is_kmi_30 BOOLEAN)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+    SELECT hu.ticker, hu.company_name, hu.sector, hu.is_kmi_30
+    FROM public.halal_universe hu
+    WHERE hu.is_active
+    ORDER BY hu.ticker;
+$$;
+REVOKE ALL ON FUNCTION public.company_directory() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.company_directory() TO anon, authenticated;
+
 -- Trigger functions must not be callable through the API
 REVOKE ALL ON FUNCTION public.sync_profile() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.enforce_watchlist_limit() FROM PUBLIC, anon, authenticated;

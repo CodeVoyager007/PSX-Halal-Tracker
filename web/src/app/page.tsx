@@ -9,13 +9,12 @@ import {
   Clock,
   Lock,
   Mail,
-  Plus,
-  Search,
   ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ChangePill, Sparkline, TickerBadge } from "@/components/market";
 import { FillArt } from "@/components/art";
+import CompanySearch from "./company-search";
 
 // Illustrative figures for the marketing previews only; not live prices.
 const PREVIEW = [
@@ -31,12 +30,6 @@ const TAPE: [string, number][] = [
   ["MLCF", 0.73], ["SEARL", -0.21], ["PAEL", 2.15], ["NML", 0.38],
 ];
 
-// Search preview rows: the three largest cement companies in the KMI All-Share index
-const SEARCH_PREVIEW: [string, string][] = [
-  ["MLCF", "Maple Leaf Cement Factory"],
-  ["DGKC", "D.G. Khan Cement Company"],
-  ["KOHC", "Kohat Cement Company"],
-];
 
 const FAQ = [
   [
@@ -200,6 +193,9 @@ export default async function Home() {
   } = await supabase.auth.getUser();
   if (user) redirect("/dashboard");
 
+  // Public directory (ticker, name, sector only; no prices) for the live search
+  const { data: companies } = await supabase.rpc("company_directory");
+
   return (
     <>
       {/* Hero: always dark; commissioned artwork of the Karachi skyline with a rising gold line */}
@@ -313,27 +309,8 @@ export default async function Home() {
             <article className="flex flex-col rounded-3xl border border-line bg-surface p-6 shadow-card md:col-span-2">
               <div className="font-display text-4xl font-medium">300+</div>
               <p className="mt-1 text-sm text-secondary">halal companies, searchable by name, ticker or sector</p>
-              <div className="mt-auto pt-5" aria-hidden="true">
-                <div className="flex items-center gap-2 rounded-xl border border-brand/40 bg-surface-2 px-3 py-2.5 text-sm ring-4 ring-brand/10">
-                  <Search className="size-4 text-muted" />
-                  <span>cement</span>
-                  <span className="-ml-1.5 h-4 w-px animate-pulse bg-brand" />
-                </div>
-                <ul className="mt-2 space-y-1">
-                  {SEARCH_PREVIEW.map(([ticker, name], i) => (
-                    <li
-                      key={ticker}
-                      className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 ${i === 0 ? "bg-brand-soft" : ""}`}
-                    >
-                      <TickerBadge ticker={ticker} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold">{ticker}</span>
-                        <span className="block truncate text-xs text-muted">{name}</span>
-                      </span>
-                      <Plus className={`size-4 shrink-0 ${i === 0 ? "text-brand" : "text-muted"}`} />
-                    </li>
-                  ))}
-                </ul>
+              <div className="mt-auto pt-5">
+                <CompanySearch companies={companies ?? []} />
               </div>
             </article>
 

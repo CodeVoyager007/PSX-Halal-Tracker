@@ -3,38 +3,20 @@
 import { useId, useMemo, useState, useTransition } from "react";
 import { LoaderCircle, Plus, Search } from "lucide-react";
 import { TickerBadge } from "@/components/market";
+import { searchCompanies, type CompanyOption } from "@/lib/search";
 import { addTicker } from "./actions";
 
-interface Option {
-  ticker: string;
-  company_name: string | null;
-  sector: string | null;
-}
 
 const MAX_RESULTS = 8;
 
-export default function AddStock({ options }: { options: Option[] }) {
+export default function AddStock({ options }: { options: CompanyOption[] }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
   const listId = useId();
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    // Ticker prefix matches first, then name or sector matches
-    const scored = options
-      .map((o) => {
-        const ticker = o.ticker.toLowerCase();
-        const text = `${o.company_name ?? ""} ${o.sector ?? ""}`.toLowerCase();
-        const score = ticker.startsWith(q) ? 0 : ticker.includes(q) ? 1 : text.includes(q) ? 2 : -1;
-        return { o, score };
-      })
-      .filter((x) => x.score >= 0)
-      .sort((a, b) => a.score - b.score || a.o.ticker.localeCompare(b.o.ticker));
-    return scored.slice(0, MAX_RESULTS).map((x) => x.o);
-  }, [options, query]);
+  const results = useMemo(() => searchCompanies(options, query, MAX_RESULTS), [options, query]);
 
   function add(ticker: string) {
     setError("");

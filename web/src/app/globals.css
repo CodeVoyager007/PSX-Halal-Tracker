@@ -123,9 +123,12 @@ html {
   mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
 }
 
-:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
+/* In the base layer so utilities (e.g. focus-visible:outline-none) can override it */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
 }
 
 /* Eight-point star lattice (khatam), drawn as a tiling SVG */
