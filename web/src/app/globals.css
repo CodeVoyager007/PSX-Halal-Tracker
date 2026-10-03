@@ -93,9 +93,10 @@
   --color-accent-ink: var(--brand-ink);
   --shadow-card: var(--shadow-card);
   --shadow-lift: var(--shadow-lift);
-  --font-sans: var(--font-bricolage);
-  --font-display: var(--font-fraunces);
-  --font-arabic: var(--font-ruqaa);
+  /* Local/system fallbacks keep CI and production builds independent of Google Fonts. */
+  --font-sans: "Trebuchet MS", Arial, sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-arabic: "Times New Roman", serif;
 }
 
 body {
@@ -154,17 +155,17 @@ html {
 
 /* Headlines use Fraunces with its softer, slightly quirky forms switched on */
 h1, h2, .font-display {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-display);
   font-variation-settings: "SOFT" 50, "WONK" 1;
   letter-spacing: -0.02em;
 }
 .font-display-italic {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-display);
   font-style: italic;
   font-variation-settings: "SOFT" 100, "WONK" 1;
 }
 .font-arabic {
-  font-family: var(--font-ruqaa), serif;
+  font-family: var(--font-arabic);
 }
 /* Figures line up in tables */
 .tabular-nums, table {

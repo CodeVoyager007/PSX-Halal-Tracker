@@ -22,15 +22,16 @@ export async function addTicker(ticker: string): Promise<{ error?: string }> {
 export async function addTickerForm(formData: FormData) {
   const ticker = formData.get("ticker");
   if (typeof ticker !== "string") return;
-  await addTicker(ticker);
-  revalidatePath(`/stocks/${ticker}`);
+  const result = await addTicker(ticker);
+  if (!result.error) revalidatePath(`/stocks/${ticker}`);
 }
 
 export async function removeTicker(formData: FormData) {
   const ticker = formData.get("ticker");
   if (typeof ticker !== "string") return;
   const supabase = await createClient();
-  await supabase.from("watchlists").delete().eq("ticker", ticker);
+  const { error } = await supabase.from("watchlists").delete().eq("ticker", ticker);
+  if (error) return;
   revalidatePath("/dashboard");
   revalidatePath(`/stocks/${ticker}`);
 }
@@ -43,9 +44,10 @@ export async function updateDigest(formData: FormData) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return;
-  await supabase
+  const { error } = await supabase
     .from("profiles")
     .update({ digest_enabled: formData.get("enabled") === "on", digest_frequency: frequency })
     .eq("id", user.id);
+  if (error) return;
   revalidatePath("/dashboard");
 }
