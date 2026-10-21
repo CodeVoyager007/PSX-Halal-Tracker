@@ -1,7 +1,10 @@
 import sys
+from collections import Counter
+from datetime import timedelta
 import psxdata
 import pandas as pd
-from common import supabase, now_pkt
+import market_data
+from common import supabase, last_session_date, now_pkt
 
 # The halal universe is the KMI All-Share index (every Shariah-compliant PSX
 # stock); KMI-30 membership is kept as a flag for filtering.
@@ -11,6 +14,10 @@ KMI_30_INDEX = "KMI30"
 # A live list shorter than this is treated as a partial/garbled fetch, and no
 # tickers are deactivated on the strength of it.
 MIN_CONSTITUENTS = 250
+
+# PSX's symbol list (/symbols) refuses GitHub's runners, so listed symbols and
+# their sector codes come from the daily market summary files of this window.
+LISTING_LOOKBACK_DAYS = 14
 
 # PSX's index listing appends a status marker to some symbols, e.g. LUCKXD for
 # Lucky Cement while it trades ex-dividend, or DSLNC for a company flagged
@@ -36,11 +43,27 @@ def base_symbol(symbol: str, known: set[str]) -> str:
     return symbol
 
 
-def fetch_constituents() -> list[dict]:
+def listed_symbols() -> dict[str, str]:
+    """{symbol: PSX sector code} for everything in recent PSX daily files."""
+    listed: dict[str, str] = {}
+    day = last_session_date(now_pkt())
+    with market_data.client() as http:
+        for _ in range(LISTING_LOOKBACK_DAYS):
+            if day.weekday() < 5:
+                for symbol, bar in (market_data.fetch_market_summary(http, day) or {}).items():
+                    listed.setdefault(symbol, bar["sector_code"])
+            day -= timedelta(days=1)
+    if not listed:
+        raise ValueError("No PSX daily market summary files were available.")
+    return listed
+
+
+def fetch_constituents(existing: dict[str, dict]) -> list[dict]:
     """
     Return one record per KMI All-Share constituent with name, sector, market cap
-    and KMI-30 flag. Raises if PSX data is unavailable: the universe only
-    changes a few times a year, so skipping a run is safer than guessing.
+    and KMI-30 flag. existing maps ticker -> its halal_universe row (is_active,
+    sector). Raises if PSX data is unavailable: the universe only changes a few
+    times a year, so skipping a run is safer than guessing.
     """
     all_share = psxdata.indices(ALL_SHARE_INDEX, cache=False)
     kmi_30 = psxdata.indices(KMI_30_INDEX, cache=False)
@@ -48,8 +71,21 @@ def fetch_constituents() -> list[dict]:
         if df is None or df.empty or "symbol" not in df.columns:
             raise ValueError(f"psxdata returned no constituents for {name}.")
 
-    sectors = psxdata.symbols(cache=False).set_index("symbol")["sector_name"].to_dict()
-    known = set(sectors)
+    listed = listed_symbols()
+    # A thinly traded company can be missing from two weeks of files, so the
+    # tickers already tracked count as known symbols too
+    known = set(listed) | {t for t, row in existing.items() if row.get("is_active")}
+
+    # Sector names for new tickers: PSX's file gives only a sector code, so name
+    # each code after the sector most existing tickers with that code carry
+    by_code: dict[str, Counter] = {}
+    for ticker, row in existing.items():
+        if row.get("sector") and ticker in listed:
+            by_code.setdefault(listed[ticker], Counter())[row["sector"]] += 1
+    sectors = {t: (existing.get(t) or {}).get("sector") or
+               (by_code[listed[t]].most_common(1)[0][0] if listed.get(t) in by_code else None)
+               for t in known}
+
     kmi_30_symbols = {base_symbol(s, known) for s in kmi_30["symbol"]}
 
     records = []
@@ -64,28 +100,26 @@ def fetch_constituents() -> list[dict]:
         if pd.notna(row.get("market_cap_m")):
             record["market_cap_m"] = float(row["market_cap_m"])
         if sectors.get(ticker):
-            record["sector"] = sectors[ticker].title()
+            record["sector"] = sectors[ticker]
         records.append(record)
     return records
 
 
 def main() -> int:
     print(f"Updating Halal Universe ({ALL_SHARE_INDEX}) at {now_pkt().isoformat()}")
+    existing_resp = supabase.table("halal_universe").select("ticker, is_active, sector").execute()
+    existing = {row["ticker"]: row for row in existing_resp.data}
+
     try:
-        records = fetch_constituents()
+        records = fetch_constituents(existing)
     except Exception as e:
         print(f"ERROR: could not fetch constituents, universe left unchanged: {e}")
-        print("PSX refuses many datacenter IPs, GitHub's runners included. Set the PSX_PROXY_URL "
-              "secret, or run this script from a Pakistani connection.")
         return 1
 
     kmi_30_count = sum(r["is_kmi_30"] for r in records)
     print(f"Fetched {len(records)} constituents ({kmi_30_count} in KMI-30).")
 
     today = now_pkt().strftime("%Y-%m-%d")
-
-    existing_resp = supabase.table("halal_universe").select("ticker, is_active").execute()
-    existing = {row["ticker"]: row for row in existing_resp.data}
     failed: list[str] = []
 
     # 1. Upsert current constituents

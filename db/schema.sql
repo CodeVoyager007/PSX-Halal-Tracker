@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS technical_indicators (
 -- Columns added after the first release, for databases created before them.
 ALTER TABLE halal_universe ADD COLUMN IF NOT EXISTS market_cap_m NUMERIC;
 
+-- Where each price came from ('psx' = PSX's official daily file, 'tradingview'
+-- until PSX publishes it) and which independent source confirmed its close
+-- ('scstrade', 'tradingview'; NULL = not confirmed)
+ALTER TABLE price_history ADD COLUMN IF NOT EXISTS source TEXT;
+ALTER TABLE price_history ADD COLUMN IF NOT EXISTS verified_with TEXT;
+
 -- portfolio / trade_journal became per-user. Existing rows have no owner and
 -- are only reachable with the service_role key until user_id is filled in.
 ALTER TABLE portfolio     ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE;
@@ -179,6 +185,8 @@ WITH recent AS (
         trade_date,
         close_price,
         volume,
+        source,
+        verified_with,
         LAG(close_price) OVER (PARTITION BY ticker ORDER BY trade_date) AS prev_close,
         ROW_NUMBER()     OVER (PARTITION BY ticker ORDER BY trade_date DESC) AS rn
     FROM price_history
@@ -214,7 +222,9 @@ SELECT
     cs.eps_ttm,
     cs.dividend_yield_pct,
     cs.beta_1y,
-    cs.as_of AS stats_as_of
+    cs.as_of AS stats_as_of,
+    r.source AS price_source,
+    r.verified_with AS price_verified_with
 FROM halal_universe hu
 LEFT JOIN recent r                ON r.ticker = hu.ticker AND r.rn = 1
 LEFT JOIN technical_indicators ti ON ti.ticker = r.ticker AND ti.trade_date = r.trade_date

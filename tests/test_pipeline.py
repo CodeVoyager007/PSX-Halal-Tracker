@@ -136,121 +136,7 @@ def test_fetch_all_pages_past_cap(monkeypatch):
     assert len(rows) == 2500
 
 
-# --- price ingestion --------------------------------------------------------
-
-def fake_psx_frame():
-    # Mirrors psxdata.stocks(): RangeIndex, `date` column, lowercase OHLCV,
-    # newest first, is_anomaly flag, nullable Int64 volume.
-    return pd.DataFrame({
-        "date": pd.to_datetime(["2026-01-07", "2026-01-06", "2026-01-05"]),
-        "open": [10.0, 11.0, 12.0], "high": [11.0, 12.0, 13.0],
-        "low": [9.0, 10.0, np.nan], "close": [10.5, 11.5, 12.5],
-        "volume": pd.array([100, 200, 300], dtype="Int64"),
-        "is_anomaly": [False, True, False],
-    })
-
-
-@pytest.mark.parametrize("hour, expected_dates", [
-    (12, ["2026-01-05"]),                # intraday: today's row dropped
-    (18, ["2026-01-05", "2026-01-07"]),  # after close: today's row kept
-])
-def test_fetch_price_records(monkeypatch, hour, expected_dates):
-    monkeypatch.setattr(common.psxdata, "stocks", lambda *a, **k: fake_psx_frame())
-    monkeypatch.setattr(common, "now_pkt", lambda: datetime(2026, 1, 7, hour, tzinfo=common.PKT))
-
-    records, skipped = common.fetch_price_records("TEST", date(2026, 1, 1))
-
-    assert [r["trade_date"] for r in records] == expected_dates  # chronological
-    assert skipped == 1
-    assert records[0]["low_price"] is None  # NaN stored as NULL, never 0
-    assert records[0]["volume"] == 300 and isinstance(records[0]["volume"], int)
-    json.dumps(records)
-
-
-def test_fetch_retries_transient_failures(monkeypatch):
-    sleeps, calls = [], []
-    monkeypatch.setattr(common.time, "sleep", sleeps.append)
-
-    def flaky(ticker, start):
-        calls.append(ticker)
-        if len(calls) == 1:
-            raise ConnectionResetError("forcibly closed")
-        return [{"ticker": ticker, "trade_date": "2026-01-05"}], 0
-
-    monkeypatch.setattr(common, "fetch_price_records", flaky)
-    records, _ = common.fetch_with_retry("OK", date(2026, 1, 1))
-    assert len(records) == 1 and len(calls) == 2
-    assert sleeps == [common.PSX_RETRY_DELAYS_SECONDS[0]]
-
-
-def test_fetch_does_not_retry_a_403(monkeypatch):
-    sleeps, calls = [], []
-    monkeypatch.setattr(common.time, "sleep", sleeps.append)
-
-    def refused(ticker, start):
-        calls.append(ticker)
-        raise common.PSXAuthError("PSX auth error (403)")
-
-    monkeypatch.setattr(common, "fetch_price_records", refused)
-    with pytest.raises(common.PSXAuthError):
-        common.fetch_with_retry("OGDC", date(2026, 1, 1))
-    assert calls == ["OGDC"] and sleeps == []
-
-
-def test_ingest_prices_reports_failures_without_stopping(monkeypatch):
-    upserts = []
-    monkeypatch.setattr(common.time, "sleep", lambda s: None)
-    monkeypatch.setattr(common, "upsert_price_records", upserts.append)
-
-    def fake_fetch(ticker, start):
-        if ticker == "BAD":
-            raise ConnectionError("PSX down")
-        return [{"ticker": ticker, "trade_date": "2026-01-05"}], 0
-
-    monkeypatch.setattr(common, "fetch_price_records", fake_fetch)
-    newest, failed, blocked = common.ingest_prices(["BAD", "OK"], lambda t: date(2026, 1, 1))
-
-    assert newest == date(2026, 1, 5)
-    assert failed == ["BAD"]
-    assert not blocked
-    assert len(upserts) == 1
-
-
-def test_ingest_prices_stops_when_psx_keeps_refusing(monkeypatch):
-    calls = []
-    monkeypatch.setattr(common.time, "sleep", lambda s: None)
-    monkeypatch.setattr(common, "upsert_price_records", lambda r: None)
-
-    def refused(ticker, start):
-        calls.append(ticker)
-        raise ConnectionError("PSX unreachable")
-
-    monkeypatch.setattr(common, "fetch_price_records", refused)
-    tickers = [f"T{i}" for i in range(300)]
-    newest, failed, blocked = common.ingest_prices(tickers, lambda t: date(2026, 1, 1))
-
-    limit = common.PSX_MAX_CONSECUTIVE_FAILURES
-    assert blocked and newest is None
-    assert failed == tickers  # untried tickers are reported too
-    # Each failed ticker is tried once plus its retries; nothing after the limit
-    assert len(calls) == limit * (len(common.PSX_RETRY_DELAYS_SECONDS) + 1)
-
-
-def test_isolated_failures_do_not_trip_the_breaker(monkeypatch):
-    monkeypatch.setattr(common.time, "sleep", lambda s: None)
-    monkeypatch.setattr(common, "upsert_price_records", lambda r: None)
-    tickers = [f"T{i}" for i in range(40)]
-    bad = set(tickers[::2])  # every other ticker fails: never 5 in a row
-
-    def fetch(ticker, start):
-        if ticker in bad:
-            raise ConnectionError("bad symbol")
-        return [{"ticker": ticker, "trade_date": "2026-01-05"}], 0
-
-    monkeypatch.setattr(common, "fetch_price_records", fetch)
-    _, failed, blocked = common.ingest_prices(tickers, lambda t: date(2026, 1, 1))
-    assert not blocked and set(failed) == bad
-
+# --- sessions -----------------------------------------------------------------
 
 @pytest.mark.parametrize("now, expected", [
     (datetime(2026, 10, 21, 18, tzinfo=common.PKT), date(2026, 10, 21)),  # Wed after close
@@ -261,16 +147,6 @@ def test_isolated_failures_do_not_trip_the_breaker(monkeypatch):
 ])
 def test_last_session_date(now, expected):
     assert common.last_session_date(now) == expected
-
-
-def test_psx_proxy_applies_to_every_psxdata_session():
-    assert common.configure_psx_proxy(None) is False
-    assert common.configure_psx_proxy("http://proxy.example:8080") is True
-    client = common.psxdata.client._client()
-    sessions = [s._session for s in vars(client).values() if hasattr(s, "_session")]
-    assert sessions and all(s.proxies["https"] == "http://proxy.example:8080" for s in sessions)
-    for s in sessions:
-        s.proxies.clear()
 
 
 def test_extended_indicators():
@@ -303,7 +179,7 @@ def run_universe(monkeypatch, existing, fetch):
 
 
 def constituents(n):
-    return lambda: [{"ticker": f"T{i}", "company_name": f"Co {i}", "is_kmi_30": i < 30} for i in range(n)]
+    return lambda existing: [{"ticker": f"T{i}", "company_name": f"Co {i}", "is_kmi_30": i < 30} for i in range(n)]
 
 
 def test_universe_preserves_added_date_and_deactivates_leavers(monkeypatch):
@@ -347,22 +223,29 @@ def test_base_symbol(listed, expected):
 def test_fetch_constituents_strips_status_suffixes(monkeypatch):
     import update_universe as uu
     indices = {
-        "KMIALLSHR": pd.DataFrame({"symbol": ["LUCKXD", "OGDC"], "name": ["Lucky Cement", "OGDCL"],
-                                   "market_cap_m": [1.0, 2.0]}),
+        "KMIALLSHR": pd.DataFrame({"symbol": ["LUCKXD", "OGDC", "ACPL", "AASMNC"],
+                                   "name": ["Lucky Cement", "OGDCL", "Attock Cement", "Al-Abid Silk"],
+                                   "market_cap_m": [1.0, 2.0, 3.0, 4.0]}),
         "KMI30": pd.DataFrame({"symbol": ["LUCKXD"]}),
     }
     monkeypatch.setattr(uu.psxdata, "indices", lambda name, cache: indices[name])
-    monkeypatch.setattr(uu.psxdata, "symbols", lambda cache: pd.DataFrame(
-        {"symbol": ["LUCK", "OGDC"], "sector_name": ["CEMENT", "OIL & GAS EXPLORATION COMPANIES"]}))
+    # PSX's daily files: symbol -> sector code. AASM did not trade in the window.
+    monkeypatch.setattr(uu, "listed_symbols", lambda: {"LUCK": "0804", "OGDC": "0820", "ACPL": "0804"})
+    existing = {
+        "LUCK": {"is_active": False, "sector": "Cement"},
+        "OGDC": {"is_active": True, "sector": "Oil & Gas Exploration Companies"},
+        "AASM": {"is_active": True, "sector": "Textile Composite"},
+    }
 
-    records = {r["ticker"]: r for r in uu.fetch_constituents()}
-    assert set(records) == {"LUCK", "OGDC"}
+    records = {r["ticker"]: r for r in uu.fetch_constituents(existing)}
+    assert set(records) == {"LUCK", "OGDC", "ACPL", "AASM"}  # AASM known because already tracked
     assert records["LUCK"]["is_kmi_30"] and records["LUCK"]["sector"] == "Cement"
+    assert records["ACPL"]["sector"] == "Cement"  # new ticker named after its sector code
     assert not records["OGDC"]["is_kmi_30"]
 
 
 def test_universe_fetch_failure_changes_nothing(monkeypatch):
-    def boom():
+    def boom(existing):
         raise ConnectionError("PSX down")
     db, status = run_universe(monkeypatch, [{"ticker": "OLD", "is_active": True}], boom)
     assert status == 1

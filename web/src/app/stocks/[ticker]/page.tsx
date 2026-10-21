@@ -9,6 +9,8 @@ import { addTickerForm, removeTicker } from "@/app/dashboard/actions";
 import PriceChart from "./price-chart";
 
 const HISTORY_DAYS = 365;
+
+const SOURCE_NAMES: Record<string, string> = { psx: "PSX", tradingview: "TradingView", scstrade: "SCS Trade" };
 const TABLE_ROWS = 30;
 
 export async function generateMetadata({ params }: PageProps<"/stocks/[ticker]">) {
@@ -93,6 +95,19 @@ export default async function StockPage({ params }: PageProps<"/stocks/[ticker]"
 
           <div className="text-left sm:text-right">
             <div className="text-xs text-muted">Close · {fmtDate(snap.trade_date)}</div>
+            {snap.price_source && (
+              <div className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted">
+                {snap.price_verified_with ? (
+                  <>
+                    <ShieldCheck className="size-3.5 text-gain" />
+                    {SOURCE_NAMES[snap.price_source] ?? snap.price_source}, confirmed by{" "}
+                    {SOURCE_NAMES[snap.price_verified_with] ?? snap.price_verified_with}
+                  </>
+                ) : (
+                  <>From {SOURCE_NAMES[snap.price_source] ?? snap.price_source} · not yet confirmed</>
+                )}
+              </div>
+            )}
             <div className="mt-1 flex items-center gap-3 sm:justify-end">
               <span className="text-3xl font-semibold tracking-tight tabular-nums">
                 <span className="mr-1 text-base font-normal text-muted">PKR</span>

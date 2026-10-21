@@ -8,7 +8,7 @@ Users sign in with an email link, build a watchlist from the ~300 companies in t
 
 | Part | Where | What it does |
 |---|---|---|
-| Data pipeline | `scripts/`, GitHub Actions | Scrapes PSX with `psxdata` (TradingView as fallback), stores prices and fundamentals, computes indicators, sends digests |
+| Data pipeline | `scripts/`, GitHub Actions | Loads PSX's official daily files, verifies them against SCS Trade, stores prices and fundamentals, computes indicators, sends digests |
 | Database & auth | Supabase (Postgres) | Market data, users, watchlists; Row Level Security keeps each user's data private |
 | Web app | `web/` (Next.js), Vercel | Sign-in, watchlist picker, dashboard, stock charts, unsubscribe |
 | Email | Resend | Digest delivery, and sign-in emails via Supabase custom SMTP |
@@ -43,7 +43,6 @@ In **Settings → Secrets and variables → Actions**, add:
 | Secret | `RESEND_API_KEY` | Resend API key (digests are skipped until set) |
 | Variable | `DIGEST_FROM` | e.g. `PSX Halal Tracker <digest@yourdomain.com>` |
 | Variable | `APP_URL` | Your web app URL, e.g. `https://psx-halal.vercel.app` |
-| Secret | `PSX_PROXY_URL` | *Optional but recommended*, see [PSX blocks GitHub's servers](#psx-blocks-githubs-servers) |
 
 ### 4. Load the data (once)
 Locally, with `.env` filled in from `.env.example`:
@@ -55,7 +54,7 @@ python scripts/backfill_historical.py      # 12 months of prices (--days N to ch
 python scripts/compute_indicators_backfill.py
 ```
 
-Alternatively, run the *Weekly Universe Refresh* workflow manually, then *Daily Data Ingestion*, which backfills any company with no history.
+Or skip the local step entirely: run the *Weekly Universe Refresh* workflow, then *Daily Data Ingestion*, which back-fills a year of history for any company that has none.
 
 ### 5. Web app (Vercel)
 1. Import the repository in [Vercel](https://vercel.com/) and set the **Root Directory** to `web`.
@@ -81,26 +80,21 @@ python scripts/send_digests.py --dry-run out/
 
 CI (`ci.yml`) runs all three test suites and a production build of the web app on every push.
 
-## PSX blocks GitHub's servers
+## Where prices come from
 
-PSX's data portal (`dps.psx.com.pk`) refuses connections from many datacenter IP ranges, GitHub Actions runners included, while answering Pakistani home and office connections normally. So the scripts work on your own machine in Pakistan but not on GitHub. (From early October 2026, every scheduled run hit the 60-minute timeout because of this.)
+Everything runs on GitHub Actions; nothing is entered by hand.
 
-The daily run handles it like this:
+| Role | Source | Notes |
+|---|---|---|
+| Prices (primary) | PSX's official daily market summary file, `dps.psx.com.pk/download/mkt_summary/<date>.Z` | One download per trading day holds every symbol's OHLCV, so any missed day, and a year of history for a new constituent, is filled by date |
+| Verification | SCS Trade historical prices | Independent site; each new price is stored as verified when its close agrees within 0.5% |
+| Latest session before PSX publishes its file | TradingView screener | Only after the 5 PM PKT cut-off, never for a live session |
+| Fundamentals | TradingView screener | Market cap, P/E, EPS, dividend yield, beta, 52-week range |
+| KMI All-Share membership | PSX's index page | Weekly |
 
-1. It tries PSX first. If 5 tickers in a row fail, PSX is refusing the connection, so the run stops trying within seconds instead of grinding through ~300 doomed requests.
-2. It then falls back to **TradingView's** public screener, which returns the latest session's bar for every ticker in one request. The run passes, with a warning on the run page.
-3. It refreshes fundamentals (market cap, P/E, EPS, dividend yield, beta) from TradingView either way.
+PSX refuses GitHub's IP addresses on its per-symbol endpoints (`/historical`, `/symbols` return HTTP 403), which is what stopped the pipeline in October 2026; the daily files and index pages are still served. `python scripts/check_sources.py`, or the manual **Check Data Sources** workflow, re-checks every source from the runner.
 
-The fallback cannot fill **gaps**, because it only has the latest bar. Missed days are filled by the next run that can reach PSX: it re-fetches from a week before each ticker's last stored day. To get full history on GitHub as well, pick one:
-
-- **Proxy (recommended):** set the `PSX_PROXY_URL` secret to an HTTP proxy on a Pakistani connection, e.g. `http://user:pass@host:3128` (Squid or tinyproxy on a small Pakistani VPS, or a residential-proxy provider with Pakistani exit IPs). Only PSX traffic goes through it. This also fixes the weekly universe refresh, which has no fallback because only PSX publishes KMI membership.
-- **Occasional local catch-up:** from a Pakistani connection, run
-  ```bash
-  python scripts/ingest_daily_data.py        # fills every missed day (from a week before each ticker's last stored day)
-  python scripts/compute_indicators_backfill.py   # only after a gap longer than ~6 weeks
-  python scripts/update_universe.py          # when KMI constituents change (January/July)
-  ```
-  The daily indicator step recomputes each ticker's last 30 sessions, so after a shorter gap the next scheduled run fixes the indicators by itself.
+Each stored price records its `source` (`psx` or `tradingview`) and `verified_with` (`scstrade`, `tradingview`, or empty when no second source confirmed it). A price that disagrees with SCS Trade is still stored from PSX, which is authoritative, but stays unverified and is listed in a warning on the run. The stock page shows the same: "PSX, confirmed by SCS Trade".
 
 ## What is stored per company
 
@@ -117,14 +111,13 @@ All of it is exposed per ticker in the `latest_snapshot` view, which the web app
 
 ## How the daily run works
 
-- `ingest_daily_data.py` re-fetches each ticker from a week before its latest stored date, so a missed or delayed run fills its own gap. A ticker with no history gets a 12-month backfill. If PSX refuses the runner, it stores the latest session's bar from TradingView instead (see above).
-- The latest session is worked out in PKT, so a run GitHub delays past midnight still labels the bar with the right day. A TradingView snapshot that just repeats the last stored session is treated as a market holiday and stores nothing.
-- Today's row is only stored after 5 PM PKT; before that PSX data is still intraday. Rows `psxdata` flags as anomalous are skipped.
-- `compute_indicators_daily.py` computes indicators for each ticker's latest date and ranks `trending_score` across active tickers.
+- `ingest_daily_data.py` works out, per ticker, every trading day after its newest stored price (a year back for a ticker with none) and downloads PSX's file for each of those days. A missed run, a delayed run or a new constituent all fill themselves. Days without a file are market holidays.
+- The latest session is worked out in PKT, so a run GitHub delays past midnight still files the bar under the right day. Before 5 PM PKT today's session is still trading and is never stored.
+- If PSX has not yet published the latest session's file, that session comes from TradingView, marked provisional; later runs fetch that day again and replace it with PSX's official figures once the file is out.
+- Every new price is checked against SCS Trade, and the latest session also against TradingView where SCS had nothing.
+- `compute_indicators_daily.py` rewrites each ticker's last 30 sessions, and the whole history of a ticker that was just back-filled.
 - `send_digests.py` emails every subscribed user with a non-empty watchlist (weekly subscribers on Fridays). `digest_log` records one row per user per market date, so re-runs never send duplicates and market holidays send nothing.
-- `compute_indicators_daily.py` rewrites each ticker's last 30 sessions, so days filled in late get indicators too.
-- Any failure, or a newest stored price more than 7 days old, fails the run, so GitHub emails the repository owner. Using the TradingView fallback only adds a warning; the run still passes.
-- Output is unbuffered (`PYTHONUNBUFFERED`), so the Actions log shows each ticker as it is processed.
+- Any failure, or a newest stored price more than 7 days old, fails the run, so GitHub emails the repository owner. Output is unbuffered, so the Actions log shows progress live.
 
 ## Keeping the free tier alive
 
@@ -133,6 +126,6 @@ All of it is exposed per ticker in the `latest_snapshot` view, which the web app
 
 ## Before charging users
 
-- **Data licensing:** redistributing PSX market data commercially generally requires an agreement with PSX. The TradingView fallback is an unofficial endpoint covered by TradingView's terms; for a paid product, license a feed.
+- **Data licensing:** redistributing PSX market data commercially generally requires an agreement with PSX. SCS Trade and TradingView are unofficial endpoints covered by their own terms; for a paid product, license a feed.
 - **Regulation:** the app presents information only (no buy/sell recommendations). Review SECP's Research Analyst Regulations before adding signals or advice.
 - **Payments:** Stripe does not support Pakistan-registered businesses; use a local gateway such as Safepay, PayFast or JazzCash.

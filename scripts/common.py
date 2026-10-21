@@ -4,14 +4,11 @@ Both indicator scripts import from here so the daily and backfill paths
 cannot drift apart.
 """
 import os
-import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 import numpy as np
 import pandas as pd
 import pandas_ta_classic as ta  # noqa: F401 — registers the DataFrame.ta accessor
-import psxdata
-from psxdata.exceptions import PSXAuthError
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -24,27 +21,6 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in the environment.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# PSX's portal refuses requests from many datacenter IP ranges, GitHub Actions
-# runners included, while answering Pakistani connections normally. Setting
-# PSX_PROXY_URL (e.g. http://user:pass@host:port on a Pakistani server) routes
-# only PSX traffic through it; Supabase and Resend still connect directly.
-PSX_PROXY_URL = os.environ.get("PSX_PROXY_URL") or None
-
-
-def configure_psx_proxy(proxy_url: str | None = PSX_PROXY_URL) -> bool:
-    """Point every psxdata scraper session at proxy_url. Returns True if applied."""
-    if not proxy_url:
-        return False
-    client = psxdata.client._client()  # the shared client behind psxdata.stocks() etc.
-    for scraper in vars(client).values():
-        session = getattr(scraper, "_session", None)
-        if session is not None:
-            session.proxies.update({"http": proxy_url, "https": proxy_url})
-    return True
-
-
-configure_psx_proxy()
 
 # technical_indicators columns written per ticker. trending_score is excluded:
 # it is cross-ticker and filled afterwards by compute_trending_score().
@@ -74,23 +50,13 @@ BBANDS_COLUMNS = {"BBL_": "bb_lower", "BBM_": "bb_middle", "BBU_": "bb_upper"}
 
 PKT = timezone(timedelta(hours=5))
 
-# PSX closes 3:30 PM Mon–Thu and 4:30 PM Fri; before 5 PM PKT today's row from
-# psxdata is still intraday (partial volume, moving close) and must not be stored.
+# PSX closes 3:30 PM Mon–Thu and 4:30 PM Fri; before 5 PM PKT today's session
+# is still intraday (partial volume, moving close) and must not be stored.
 TODAY_FINAL_HOUR_PKT = 17
 
 # Supabase caps each response at 1,000 rows by default
 PAGE_SIZE = 1000
 UPSERT_CHUNK_SIZE = 100
-
-# PSX's portal resets connections when hit with ~300 back-to-back requests.
-# Pace requests and retry transient failures with backoff.
-PSX_REQUEST_PAUSE_SECONDS = 0.5
-PSX_RETRY_DELAYS_SECONDS = (5, 20)
-
-# After this many tickers in a row fail to fetch, PSX is refusing us (not one
-# bad symbol), so stop instead of grinding through ~300 doomed requests. Before
-# this existed, a blocked run took ~35 s per ticker and hit the job timeout.
-PSX_MAX_CONSECUTIVE_FAILURES = 5
 
 
 def now_pkt() -> datetime:
@@ -132,66 +98,6 @@ def get_latest_trade_date(ticker: str) -> date | None:
     return date.fromisoformat(resp.data[0]["trade_date"]) if resp.data else None
 
 
-def _float(val):
-    # NaN is truthy, so `val or None` would not catch it. Storing NULL (not 0) keeps
-    # fake prices out of the indicator calculations downstream.
-    return float(val) if pd.notna(val) else None
-
-
-def _int(val):
-    return int(val) if pd.notna(val) else None
-
-
-def fetch_price_records(ticker: str, start: date) -> tuple[list[dict], int]:
-    """
-    Fetch finalised OHLCV rows on or after start as price_history records.
-    Returns (records, anomalous rows skipped).
-    """
-    # cache=False: psxdata's on-disk historical cache never expires locally
-    df = psxdata.stocks(ticker, start=start, cache=False)
-    if df is None or df.empty:
-        return [], 0
-
-    # psxdata returns `date` as a column (RangeIndex), lowercase OHLCV, and an is_anomaly flag
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["date"])
-
-    now = now_pkt()
-    if now.hour < TODAY_FINAL_HOUR_PKT:
-        df = df[df["date"].dt.date < now.date()]
-
-    anomalous = df["is_anomaly"].fillna(False).astype(bool) if "is_anomaly" in df.columns \
-        else pd.Series(False, index=df.index)
-    df = df[~anomalous]
-
-    records = [
-        {
-            "ticker": ticker,
-            "trade_date": row["date"].strftime("%Y-%m-%d"),
-            "open_price":  _float(row.get("open")),
-            "high_price":  _float(row.get("high")),
-            "low_price":   _float(row.get("low")),
-            "close_price": _float(row.get("close")),
-            "volume":      _int(row.get("volume")),
-        }
-        for row in df.sort_values("date").to_dict("records")
-    ]
-    return records, int(anomalous.sum())
-
-
-def fetch_with_retry(ticker: str, start: date) -> tuple[list[dict], int]:
-    """fetch_price_records, retrying connection resets and timeouts with backoff."""
-    for attempt, delay in enumerate((*PSX_RETRY_DELAYS_SECONDS, None), start=1):
-        try:
-            return fetch_price_records(ticker, start)
-        except Exception as e:
-            # 403 is PSX refusing this IP, not a glitch: waiting will not change it
-            if delay is None or isinstance(e, PSXAuthError):
-                raise
-            print(f"  Attempt {attempt} failed ({e}); retrying in {delay}s.")
-            time.sleep(delay)
-
-
 def upsert_price_records(records: list[dict]):
     # on_conflict targets the UNIQUE (ticker, trade_date) constraint, not the id
     # primary key, so re-runs update existing rows instead of failing on duplicates.
@@ -199,49 +105,6 @@ def upsert_price_records(records: list[dict]):
         supabase.table("price_history").upsert(
             records[i:i + UPSERT_CHUNK_SIZE], on_conflict="ticker,trade_date"
         ).execute()
-
-
-def ingest_prices(tickers: list[str], start_for: Callable[[str], date]) -> tuple[date | None, list[str], bool]:
-    """
-    Fetch and upsert prices for each ticker from start_for(ticker) onwards.
-    Returns (newest trade_date stored, tickers that errored or were not tried,
-    whether the run stopped early because PSX kept refusing requests).
-    """
-    newest: date | None = None
-    failed: list[str] = []
-    consecutive_fetch_failures = 0
-
-    for i, ticker in enumerate(tickers):
-        if consecutive_fetch_failures >= PSX_MAX_CONSECUTIVE_FAILURES:
-            remaining = tickers[i:]
-            print(f"\nPSX failed {consecutive_fetch_failures} tickers in a row; it is refusing this "
-                  f"connection. Skipping the remaining {len(remaining)} ticker(s).")
-            return newest, failed + remaining, True
-        if i:
-            time.sleep(PSX_REQUEST_PAUSE_SECONDS)
-        try:
-            start = start_for(ticker)
-            print(f"Processing {ticker} (from {start})...")
-            try:
-                records, skipped = fetch_with_retry(ticker, start)
-            except Exception:
-                consecutive_fetch_failures += 1
-                raise
-            consecutive_fetch_failures = 0
-            if skipped:
-                print(f"  Skipped {skipped} anomalous row(s).")
-            if not records:
-                print("  No new finalised rows.")
-                continue
-            upsert_price_records(records)
-            last = date.fromisoformat(records[-1]["trade_date"])
-            newest = last if newest is None else max(newest, last)
-            print(f"  Upserted {len(records)} row(s) through {last}.")
-        except Exception as e:
-            print(f"  Error processing {ticker}: {e}")
-            failed.append(ticker)
-
-    return newest, failed, False
 
 
 def price_rows_to_frame(rows: list[dict]) -> pd.DataFrame:

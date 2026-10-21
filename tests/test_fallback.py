@@ -142,89 +142,140 @@ def test_fundamental_fields_are_requested_once():
     assert {"dividends_yield_current", "dividends_yield", "dividend_yield_recent"} <= set(fields)
 
 
-# --- daily run: source selection ---------------------------------------------------
+# --- daily run: sources, fallback and verification --------------------------------
+
+LUCK_BAR = {"open": 400.34, "high": 403.9, "low": 396.6, "close": 398.05, "volume": 304340,
+            "ldcp": 400.34, "sector_code": "0804"}
+
 
 @pytest.fixture
 def daily(monkeypatch):
     import ingest_daily_data as daily
-    db = FakeDB({
-        "halal_universe": [{"ticker": "A"}, {"ticker": "B"}],
-        "price_history": [stored("A", "2026-10-20", 98.0, 900), stored("B", "2026-10-20", 48.0, 900)],
-    })
+    import market_data as md
+    db = FakeDB({"price_history": [stored("A", "2026-10-19", 98.0, 900), stored("B", "2026-10-19", 48.0, 900)]})
     monkeypatch.setattr(daily, "supabase", db)
     monkeypatch.setattr(common, "supabase", db)
+    monkeypatch.setattr(daily.time, "sleep", lambda s: None)
+    monkeypatch.setattr(md.time, "sleep", lambda s: None)
     monkeypatch.setattr(daily, "get_active_tickers", lambda: ["A", "B"])
-    monkeypatch.setattr(daily, "get_latest_trade_date", lambda t: date(2026, 10, 20))
+    monkeypatch.setattr(daily, "get_latest_trade_date", lambda t: date(2026, 10, 19))
     monkeypatch.setattr(daily, "now_pkt", lambda: datetime(2026, 10, 21, 18, tzinfo=common.PKT))
     monkeypatch.setattr(daily, "newest_stored_date", lambda: date(2026, 10, 21))
-    upserted = []
-    monkeypatch.setattr(daily, "upsert_price_records", upserted.extend)
+    monkeypatch.setattr(daily, "provisional_dates", lambda since: {})
+    stored_rows = []
+    monkeypatch.setattr(daily, "upsert_price_records", stored_rows.extend)
     monkeypatch.setattr(tv, "scan_dropping_unknown", lambda t, f: ({"A": {"price_earnings_ttm": 5.0}}, []))
-    return daily, db, upserted
+    monkeypatch.setattr(tv, "scan", lambda t, f: {})  # tests stay offline; override per test
+    # Default: PSX has files for both missing days; SCS agrees with everything
+    files = {date(2026, 10, 20): {"A": bar(100.0), "B": bar(50.0)},
+             date(2026, 10, 21): {"A": bar(101.0), "B": bar(51.0)}}
+    monkeypatch.setattr(md, "fetch_market_summary", lambda http, day: files.get(day))
+    scs = {}
+    monkeypatch.setattr(md, "fetch_scs_history", lambda http, t, start, end: scs.get(t, {}))
+    return daily, db, stored_rows, files, scs
 
 
-def test_daily_falls_back_to_tradingview_when_psx_blocks(daily, monkeypatch):
-    daily, db, upserted = daily
-    monkeypatch.setattr(daily, "ingest_prices", lambda t, s: (None, list(t), True))
-    monkeypatch.setattr(tv, "scan", lambda t, f: {"A": bar(100.0), "B": bar(50.0)})
+def scs_bars(rows):
+    return {d: {"close": c, "volume": 1000} for d, c in rows}
+
+
+def test_daily_catches_up_every_missing_day_from_psx_files(daily):
+    daily, db, stored_rows, files, scs = daily
+    scs["A"] = scs_bars([("2026-10-20", 100.0), ("2026-10-21", 101.0)])
+    scs["B"] = scs_bars([("2026-10-20", 50.0), ("2026-10-21", 51.3)])  # disagrees on 21st
 
     assert daily.main() == 0
-    assert sorted(r["ticker"] for r in upserted) == ["A", "B"]
-    assert all(r["trade_date"] == "2026-10-21" for r in upserted)
+    got = {(r["ticker"], r["trade_date"]): r for r in stored_rows}
+    assert set(got) == {("A", "2026-10-20"), ("A", "2026-10-21"), ("B", "2026-10-20"), ("B", "2026-10-21")}
+    assert all(r["source"] == "psx" for r in stored_rows)
+    assert got[("A", "2026-10-21")]["verified_with"] == "scstrade"
+    assert got[("B", "2026-10-20")]["verified_with"] == "scstrade"
+    assert got[("B", "2026-10-21")]["verified_with"] is None  # mismatch: kept, flagged
     (stats,) = [c for c in db.ops("upsert") if c.table == "company_stats"]
     assert stats.payload[0]["pe_ratio"] == 5.0
 
 
-def test_daily_fails_when_both_sources_fail(daily, monkeypatch):
-    daily, _, upserted = daily
-    monkeypatch.setattr(daily, "ingest_prices", lambda t, s: (None, list(t), True))
-
-    def down(t, f):
-        raise httpx.ConnectError("unreachable")
-
-    monkeypatch.setattr(tv, "scan", down)
-    assert daily.main() == 1
-    assert upserted == []
+def test_daily_skips_holidays_without_failing(daily):
+    daily, _, stored_rows, files, _ = daily
+    del files[date(2026, 10, 20)]  # no file: market shut
+    assert daily.main() == 0
+    assert {r["trade_date"] for r in stored_rows} == {"2026-10-21"}
 
 
-def test_daily_uses_psx_alone_when_it_works(daily, monkeypatch):
-    daily, _, _ = daily
-    monkeypatch.setattr(daily, "ingest_prices", lambda t, s: (date(2026, 10, 21), [], False))
+def test_daily_takes_unpublished_session_from_tradingview(daily, monkeypatch):
+    daily, _, stored_rows, files, _ = daily
+    del files[date(2026, 10, 21)]  # PSX has not published today's file yet
+    monkeypatch.setattr(tv, "scan", lambda t, f: {"A": bar(101.0), "B": bar(51.0)})
+
+    assert daily.main() == 0
+    sources = {(r["ticker"], r["trade_date"]): r["source"] for r in stored_rows}
+    assert sources[("A", "2026-10-20")] == "psx"
+    assert sources[("A", "2026-10-21")] == "tradingview"
+
+
+def test_daily_never_stores_a_live_session_from_tradingview(daily, monkeypatch):
+    daily, _, stored_rows, files, _ = daily
+    monkeypatch.setattr(daily, "now_pkt", lambda: datetime(2026, 10, 21, 11, tzinfo=common.PKT))
+    files[date(2026, 10, 20)] = None  # yesterday's file missing too: only TradingView could help
 
     def must_not_run(t, f):
-        raise AssertionError("TradingView prices fetched although PSX worked")
+        raise AssertionError("TradingView used during market hours")
 
     monkeypatch.setattr(tv, "scan", must_not_run)
+    daily.main()
+    assert stored_rows == []
+
+
+def test_tradingview_checks_what_scs_could_not(daily, monkeypatch):
+    daily, _, stored_rows, _, scs = daily
+    monkeypatch.setattr(tv, "scan", lambda t, f: {"A": {"close": 101.0}, "B": {"close": 60.0}})
     assert daily.main() == 0
+    today = {r["ticker"]: r["verified_with"] for r in stored_rows if r["trade_date"] == "2026-10-21"}
+    assert today == {"A": "tradingview", "B": None}
 
 
-def test_daily_fundamentals_failure_only_warns(daily, monkeypatch, capsys):
-    daily, _, _ = daily
-    monkeypatch.setattr(daily, "ingest_prices", lambda t, s: (date(2026, 10, 21), [], False))
+def test_daily_stops_after_repeated_psx_failures(daily, monkeypatch):
+    daily, _, stored_rows, _, _ = daily
+    import market_data as md
+    calls = []
 
-    def down(t, f):
+    def down(http, day):
+        calls.append(day)
         raise httpx.ConnectError("unreachable")
 
-    monkeypatch.setattr(tv, "scan_dropping_unknown", down)
+    monkeypatch.setattr(md, "fetch_market_summary", down)
+    monkeypatch.setattr(daily, "get_latest_trade_date", lambda t: date(2026, 9, 1))
+    monkeypatch.setattr(tv, "scan", lambda t, f: {"A": bar(101.0), "B": bar(51.0)})
+    assert daily.main() == 1
+    assert len(calls) == daily.MAX_CONSECUTIVE_FAILURES
+    # The latest session still comes from TradingView
+    assert {r["trade_date"] for r in stored_rows} == {"2026-10-21"}
+
+
+def test_new_ticker_gets_a_year_of_history(daily, monkeypatch):
+    daily, _, stored_rows, files, _ = daily
+    monkeypatch.setattr(daily, "get_active_tickers", lambda: ["NEW"])
+    monkeypatch.setattr(daily, "get_latest_trade_date", lambda t: None)
+    days = []
+    import market_data as md
+    monkeypatch.setattr(md, "fetch_market_summary", lambda http, day: days.append(day) or {"NEW": bar(10.0)})
     assert daily.main() == 0
-    assert "::warning::Fundamentals refresh failed" in capsys.readouterr().out
+    assert min(days) >= date(2025, 10, 21) and max(days) == date(2026, 10, 21)
+    assert len(stored_rows) == len(days) > 250
 
 
 def test_daily_flags_stale_data(daily, monkeypatch):
-    daily, _, _ = daily
-    monkeypatch.setattr(daily, "ingest_prices", lambda t, s: (None, [], False))
+    daily, _, _, files, _ = daily
+    files.clear()
+    monkeypatch.setattr(tv, "scan", lambda t, f: {})
     monkeypatch.setattr(daily, "newest_stored_date", lambda: date(2026, 9, 23))
     assert daily.main() == 1
 
 
-def test_daily_never_stores_a_live_session_from_tradingview(daily, monkeypatch):
-    daily, _, upserted = daily
-    monkeypatch.setattr(daily, "now_pkt", lambda: datetime(2026, 10, 21, 11, tzinfo=common.PKT))
-    monkeypatch.setattr(daily, "ingest_prices", lambda t, s: (None, list(t), True))
-
-    def must_not_run(t, f):
-        raise AssertionError("TradingView prices fetched during market hours")
-
-    monkeypatch.setattr(tv, "scan", must_not_run)
-    daily.main()
-    assert upserted == []
+def test_provisional_tradingview_days_are_replaced_by_psx(daily, monkeypatch):
+    daily, _, stored_rows, files, _ = daily
+    # Everything is stored through the 21st, but the 21st came from TradingView
+    monkeypatch.setattr(daily, "get_latest_trade_date", lambda t: date(2026, 10, 21))
+    monkeypatch.setattr(daily, "provisional_dates", lambda since: {"A": date(2026, 10, 21)})
+    assert daily.main() == 0
+    assert [(r["ticker"], r["trade_date"], r["source"]) for r in stored_rows] == [("A", "2026-10-21", "psx")]

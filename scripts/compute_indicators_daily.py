@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from common import (
     supabase,
     PKT,
+    fetch_all,
     get_active_tickers,
     price_rows_to_frame,
     process_dataframe,
@@ -19,6 +20,12 @@ RECOMPUTE_ROWS = 30
 # and EMA/RSI/MACD from this many rows match the full-history backfill to well
 # below the 2-decimal precision stored in the schema.
 LOOKBACK_ROWS = 252 + RECOMPUTE_ROWS
+
+
+def earliest_date(table: str, ticker: str) -> str | None:
+    resp = supabase.table(table).select("trade_date").eq("ticker", ticker) \
+        .order("trade_date").limit(1).execute()
+    return resp.data[0]["trade_date"] if resp.data else None
 
 
 def main() -> int:
@@ -38,19 +45,25 @@ def main() -> int:
     for ticker in tickers:
         print(f"Processing {ticker}...")
 
-        # Fetch the trailing rows DESC so .limit() keeps the most recent ones
-        history_response = supabase.table("price_history") \
-            .select("trade_date, open_price, high_price, low_price, close_price, volume") \
-            .eq("ticker", ticker) \
-            .order("trade_date", desc=True) \
-            .limit(LOOKBACK_ROWS) \
-            .execute()
-
-        if not history_response.data:
+        # A ticker whose prices start before its indicators (a new listing that
+        # was just back-filled) gets indicators for its whole history
+        first_price = earliest_date("price_history", ticker)
+        if first_price is None:
             print(f"  No price history found for {ticker}.")
             continue
+        first_indicator = earliest_date("technical_indicators", ticker)
+        full = first_indicator is None or first_price < first_indicator
 
-        df = price_rows_to_frame(history_response.data)
+        columns = "trade_date, open_price, high_price, low_price, close_price, volume"
+        if full:
+            history = fetch_all(lambda: supabase.table("price_history").select(columns)
+                                .eq("ticker", ticker).order("trade_date"))
+        else:
+            # Fetch the trailing rows DESC so .limit() keeps the most recent ones
+            history = supabase.table("price_history").select(columns).eq("ticker", ticker) \
+                .order("trade_date", desc=True).limit(LOOKBACK_ROWS).execute().data
+
+        df = price_rows_to_frame(history)
 
         try:
             df = process_dataframe(df)
@@ -60,12 +73,14 @@ def main() -> int:
             continue
 
         # process_dataframe sorts chronologically, so the final rows are the latest dates
-        records = [to_indicator_record(ticker, row) for _, row in df.tail(RECOMPUTE_ROWS).iterrows()]
+        rows = df if full else df.tail(RECOMPUTE_ROWS)
+        records = [to_indicator_record(ticker, row) for _, row in rows.iterrows()]
 
         try:
-            supabase.table("technical_indicators").upsert(
-                records, on_conflict="ticker,trade_date"
-            ).execute()
+            for i in range(0, len(records), 100):
+                supabase.table("technical_indicators").upsert(
+                    records[i:i + 100], on_conflict="ticker,trade_date"
+                ).execute()
             latest_date_by_ticker[ticker] = records[-1]["trade_date"]
             dates_written.update(r["trade_date"] for r in records)
             print(f"  Upserted indicators for {ticker} through {records[-1]['trade_date']}.")

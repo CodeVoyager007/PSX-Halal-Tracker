@@ -30,9 +30,6 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      # Optional. PSX refuses GitHub's runners; a proxy on a Pakistani
-      # connection restores full history and gap-filling (see README).
-      PSX_PROXY_URL: ${{ secrets.PSX_PROXY_URL }}
       # Print logs as they happen. Without this, Python buffers output and a
       # run killed by the timeout shows nothing at all.
       PYTHONUNBUFFERED: '1'
@@ -53,9 +50,10 @@ jobs:
       - name: Run Tests
         run: pytest -q
 
-      # Prices from PSX; if PSX refuses the runner, today's bar from TradingView.
-      # Also refreshes fundamentals. Exits non-zero if no source works, any
-      # ticker fails while PSX is up, or the newest stored price is stale.
+      # Every missing session from PSX's official daily files (TradingView for a
+      # session PSX has not published yet), each price cross-checked against SCS
+      # Trade, then fundamentals. Exits non-zero if PSX's files keep failing, no
+      # source has the latest session, or the newest stored price is stale.
       - name: Run Daily Ingestion Script
         run: python scripts/ingest_daily_data.py
 

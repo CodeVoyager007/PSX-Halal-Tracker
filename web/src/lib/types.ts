@@ -32,6 +32,10 @@ export interface SnapshotRow {
   dividend_yield_pct: Num;
   beta_1y: Num;
   stats_as_of: string | null;
+  /** 'psx' (PSX's official daily file) or 'tradingview' (until PSX publishes it). */
+  price_source: string | null;
+  /** Independent source that confirmed the close ('scstrade', 'tradingview'), or null. */
+  price_verified_with: string | null;
 }
 
 export type DigestFrequency = "daily" | "weekly";

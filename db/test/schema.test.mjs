@@ -34,8 +34,8 @@ ok(true, "schema.sql runs twice without error");
 await db.exec(`
   INSERT INTO halal_universe (ticker, company_name, is_active) VALUES ('OGDC','Oil & Gas Dev', true), ('OLD','Delisted', false);
   INSERT INTO halal_universe (ticker, is_active) SELECT 'T' || g, true FROM generate_series(1, 60) g;
-  INSERT INTO price_history (ticker, trade_date, close_price, volume) VALUES
-    ('OGDC', CURRENT_DATE - 2, 100, 1000), ('OGDC', CURRENT_DATE - 1, 110, 2000);
+  INSERT INTO price_history (ticker, trade_date, close_price, volume, source, verified_with) VALUES
+    ('OGDC', CURRENT_DATE - 2, 100, 1000, 'psx', 'scstrade'), ('OGDC', CURRENT_DATE - 1, 110, 2000, 'psx', 'scstrade');
   INSERT INTO technical_indicators (ticker, trade_date, rsi_14, high_52w, return_1y_pct) VALUES ('OGDC', CURRENT_DATE - 1, 72.5, 130, 25.5);
   INSERT INTO company_stats (ticker, as_of, market_cap, pe_ratio, dividend_yield_pct) VALUES ('OGDC', CURRENT_DATE - 1, 5e11, 4.2, 9.8);
   INSERT INTO auth.users (id, email) VALUES
@@ -54,6 +54,7 @@ ok(Number(snap.close_price) === 110 && Number(snap.prev_close) === 100 && Number
 ok((await db.query("SELECT count(*)::int n FROM latest_snapshot WHERE ticker = 'OLD'")).rows[0].n === 0, "latest_snapshot excludes inactive tickers");
 ok(Number(snap.high_52w) === 130 && Number(snap.return_1y_pct) === 25.5 && Number(snap.pe_ratio) === 4.2 && Number(snap.dividend_yield_pct) === 9.8,
    "latest_snapshot carries 52-week range, returns and company_stats fundamentals");
+ok(snap.price_source === "psx" && snap.price_verified_with === "scstrade", "latest_snapshot says where the price came from and what verified it");
 
 // --- as signed-in user 1
 await db.exec(`SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '${U1}', false);`);
