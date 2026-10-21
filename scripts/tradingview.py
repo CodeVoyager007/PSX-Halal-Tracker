@@ -27,17 +27,26 @@ HEADERS = {
 # fundamentals field, prices must keep flowing.
 PRICE_FIELDS = ["open", "high", "low", "close", "volume"]
 
-# TradingView field -> company_stats column
+# company_stats column -> TradingView fields, in order of preference; the first
+# non-empty one wins. TradingView carries several dividend-yield variants and not
+# all are populated for PSX (dividend_yield_recent came back empty for every
+# ticker), so the alternatives are requested too. Unknown fields are dropped by
+# scan_dropping_unknown, so listing a candidate is harmless.
 FUNDAMENTAL_FIELDS = {
-    "market_cap_basic": "market_cap",
-    "price_earnings_ttm": "pe_ratio",
-    "earnings_per_share_basic_ttm": "eps_ttm",
-    "dividend_yield_recent": "dividend_yield_pct",
-    "price_52_week_high": "high_52w",
-    "price_52_week_low": "low_52w",
-    "beta_1_year": "beta_1y",
-    "average_volume_30d_calc": "avg_volume_30d",
+    "market_cap": ("market_cap_basic",),
+    "pe_ratio": ("price_earnings_ttm",),
+    "eps_ttm": ("earnings_per_share_basic_ttm",),
+    "dividend_yield_pct": ("dividends_yield_current", "dividends_yield", "dividend_yield_recent"),
+    "high_52w": ("price_52_week_high",),
+    "low_52w": ("price_52_week_low",),
+    "beta_1y": ("beta_1_year",),
+    "avg_volume_30d": ("average_volume_30d_calc",),
 }
+
+
+def fundamental_tv_fields() -> list[str]:
+    """Every TradingView field FUNDAMENTAL_FIELDS may read, without duplicates."""
+    return list(dict.fromkeys(f for fields in FUNDAMENTAL_FIELDS.values() for f in fields))
 
 # If most tickers' "today" bar is identical to the last stored bar, TradingView
 # is still serving the previous session: the market was shut (holiday).
@@ -163,10 +172,11 @@ def fundamentals_records(snapshot: dict[str, dict], as_of: date) -> list[dict]:
     records = []
     for ticker, values in snapshot.items():
         record = {"ticker": ticker, "as_of": as_of.isoformat()}
-        for field, column in FUNDAMENTAL_FIELDS.items():
-            record[column] = _number(values.get(field))
+        for column, fields in FUNDAMENTAL_FIELDS.items():
+            record[column] = next(
+                (n for n in (_number(values.get(f)) for f in fields) if n is not None), None)
         if record["avg_volume_30d"] is not None:
             record["avg_volume_30d"] = int(round(record["avg_volume_30d"]))
-        if any(record[c] is not None for c in FUNDAMENTAL_FIELDS.values()):
+        if any(record[c] is not None for c in FUNDAMENTAL_FIELDS):
             records.append(record)
     return records

@@ -121,7 +121,9 @@ def test_snapshot_that_repeats_last_session_is_a_holiday():
 
 def test_fundamentals_records():
     snapshot = {
-        "OGDC": {"market_cap_basic": 9.1e11, "price_earnings_ttm": 4.2, "average_volume_30d_calc": 1234.6},
+        "OGDC": {"market_cap_basic": 9.1e11, "price_earnings_ttm": 4.2, "average_volume_30d_calc": 1234.6,
+                 # first preference empty: the next populated variant is used
+                 "dividends_yield_current": None, "dividends_yield": 7.5, "dividend_yield_recent": None},
         "EMPTY": {"market_cap_basic": None},
     }
     records = tv.fundamentals_records(snapshot, SESSION)
@@ -130,7 +132,14 @@ def test_fundamentals_records():
     assert rec["ticker"] == "OGDC" and rec["as_of"] == "2026-10-21"
     assert rec["market_cap"] == 9.1e11 and rec["pe_ratio"] == 4.2
     assert rec["avg_volume_30d"] == 1235 and rec["beta_1y"] is None
-    assert set(rec) == {"ticker", "as_of", *tv.FUNDAMENTAL_FIELDS.values()}
+    assert rec["dividend_yield_pct"] == 7.5
+    assert set(rec) == {"ticker", "as_of", *tv.FUNDAMENTAL_FIELDS}
+
+
+def test_fundamental_fields_are_requested_once():
+    fields = tv.fundamental_tv_fields()
+    assert len(fields) == len(set(fields))
+    assert {"dividends_yield_current", "dividends_yield", "dividend_yield_recent"} <= set(fields)
 
 
 # --- daily run: source selection ---------------------------------------------------

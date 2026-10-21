@@ -76,10 +76,12 @@ def refresh_fundamentals(tickers: list[str], as_of: date) -> bool:
     print("\nRefreshing company fundamentals from TradingView...")
     try:
         snapshot, dropped = tradingview.scan_dropping_unknown(
-            tickers, list(tradingview.FUNDAMENTAL_FIELDS))
+            tickers, tradingview.fundamental_tv_fields())
         if dropped:
             warn(f"TradingView no longer knows field(s) {', '.join(dropped)}; stored as NULL.")
         records = tradingview.fundamentals_records(snapshot, as_of)
+        filled = {c: sum(r[c] is not None for r in records) for c in tradingview.FUNDAMENTAL_FIELDS}
+        print("  Values per field: " + ", ".join(f"{c} {n}" for c, n in filled.items()))
         updated_at = datetime.now(timezone.utc).isoformat()
         for record in records:
             record["updated_at"] = updated_at  # the column default only applies on insert
