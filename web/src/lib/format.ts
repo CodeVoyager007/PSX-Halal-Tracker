@@ -20,6 +20,15 @@ export function fmtNum(v: number | string | null | undefined, digits = 0): strin
   return n === null ? "—" : n.toLocaleString("en-PK", { maximumFractionDigits: digits });
 }
 
+/** Large PKR amounts in Pakistani market shorthand: 912.3bn, 45.1m. */
+export function fmtPkrCompact(v: number | string | null | undefined): string {
+  const n = toNum(v);
+  if (n === null) return "—";
+  if (Math.abs(n) >= 1e9) return `PKR ${(n / 1e9).toLocaleString("en-PK", { maximumFractionDigits: 1 })}bn`;
+  if (Math.abs(n) >= 1e6) return `PKR ${(n / 1e6).toLocaleString("en-PK", { maximumFractionDigits: 1 })}m`;
+  return `PKR ${fmtNum(n)}`;
+}
+
 export function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });

@@ -49,6 +49,8 @@ def main() -> int:
         records = fetch_constituents()
     except Exception as e:
         print(f"ERROR: could not fetch constituents, universe left unchanged: {e}")
+        print("PSX refuses many datacenter IPs, GitHub's runners included. Set the PSX_PROXY_URL "
+              "secret, or run this script from a Pakistani connection.")
         return 1
 
     kmi_30_count = sum(r["is_kmi_30"] for r in records)

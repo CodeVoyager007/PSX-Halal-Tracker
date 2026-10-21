@@ -36,7 +36,8 @@ await db.exec(`
   INSERT INTO halal_universe (ticker, is_active) SELECT 'T' || g, true FROM generate_series(1, 60) g;
   INSERT INTO price_history (ticker, trade_date, close_price, volume) VALUES
     ('OGDC', CURRENT_DATE - 2, 100, 1000), ('OGDC', CURRENT_DATE - 1, 110, 2000);
-  INSERT INTO technical_indicators (ticker, trade_date, rsi_14) VALUES ('OGDC', CURRENT_DATE - 1, 72.5);
+  INSERT INTO technical_indicators (ticker, trade_date, rsi_14, high_52w, return_1y_pct) VALUES ('OGDC', CURRENT_DATE - 1, 72.5, 130, 25.5);
+  INSERT INTO company_stats (ticker, as_of, market_cap, pe_ratio, dividend_yield_pct) VALUES ('OGDC', CURRENT_DATE - 1, 5e11, 4.2, 9.8);
   INSERT INTO auth.users (id, email) VALUES
     ('11111111-1111-1111-1111-111111111111', 'a@example.com'),
     ('22222222-2222-2222-2222-222222222222', 'b@example.com');
@@ -51,6 +52,8 @@ const snap = (await db.query("SELECT * FROM latest_snapshot WHERE ticker = 'OGDC
 ok(Number(snap.close_price) === 110 && Number(snap.prev_close) === 100 && Number(snap.change_1d_pct) === 10 && Number(snap.rsi_14) === 72.5,
    `latest_snapshot row correct (close ${snap.close_price}, prev ${snap.prev_close}, 1d ${snap.change_1d_pct}%, rsi ${snap.rsi_14})`);
 ok((await db.query("SELECT count(*)::int n FROM latest_snapshot WHERE ticker = 'OLD'")).rows[0].n === 0, "latest_snapshot excludes inactive tickers");
+ok(Number(snap.high_52w) === 130 && Number(snap.return_1y_pct) === 25.5 && Number(snap.pe_ratio) === 4.2 && Number(snap.dividend_yield_pct) === 9.8,
+   "latest_snapshot carries 52-week range, returns and company_stats fundamentals");
 
 // --- as signed-in user 1
 await db.exec(`SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '${U1}', false);`);
@@ -66,6 +69,9 @@ await rejects("UPDATE profiles SET unsubscribe_token = gen_random_uuid()", "user
 ok((await db.query("SELECT count(*)::int n FROM profiles")).rows[0].n === 1, "user sees only own profile");
 await rejects("INSERT INTO digest_log (user_id, digest_date, status) VALUES (auth.uid(), CURRENT_DATE, 'sent')", "user cannot write digest_log");
 await rejects("INSERT INTO price_history (ticker, trade_date) VALUES ('OGDC', CURRENT_DATE)", "user cannot write market data");
+ok((await db.query("SELECT count(*)::int n FROM company_stats")).rows[0].n === 1, "signed-in user reads company_stats");
+ok((await db.query("UPDATE company_stats SET pe_ratio = 1")).affectedRows === 0, "user cannot change company_stats");
+await rejects("INSERT INTO company_stats (ticker, as_of) VALUES ('T1', CURRENT_DATE)", "user cannot add company_stats rows");
 for (let i = 1; i <= 49; i++) await db.query(`INSERT INTO watchlists (ticker) VALUES ('T${i}')`);
 ok(true, "user fills watchlist to 50");
 await rejects("INSERT INTO watchlists (ticker) VALUES ('T50')", "51st watchlist entry rejected");
@@ -85,6 +91,7 @@ ok(r.affectedRows === 0, "user 2 cannot delete user 1's watchlist rows");
 await db.exec("RESET ROLE; SET ROLE anon; SELECT set_config('request.jwt.claim.sub', '', false);");
 ok((await db.query("SELECT count(*)::int n FROM halal_universe")).rows[0].n === 0, "anon cannot read market data");
 ok((await db.query("SELECT count(*)::int n FROM profiles")).rows[0].n === 0, "anon cannot read profiles");
+ok((await db.query("SELECT count(*)::int n FROM company_stats")).rows[0].n === 0, "anon cannot read company_stats");
 const dir = await db.query("SELECT * FROM company_directory()");
 ok(dir.rows.length === 61 && !dir.rows.some((r) => r.ticker === "OLD"), "anon can list active companies via company_directory()");
 ok(Object.keys(dir.rows[0]).sort().join() === "company_name,is_kmi_30,sector,ticker", "company_directory exposes no price or market-cap columns");

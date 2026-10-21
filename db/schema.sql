@@ -111,6 +111,31 @@ ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS volume_spike_ratio NUM
 ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS price_change_5d_pct NUMERIC(10, 4);
 ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS trending_score NUMERIC(10, 4);
 
+-- Volatility, 52-week range and period returns, computed from price_history
+ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS atr_14 NUMERIC(10, 2);             -- 14-day average true range (PKR)
+ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS high_52w NUMERIC(10, 2);           -- highest high, trailing 365 days
+ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS low_52w NUMERIC(10, 2);            -- lowest low, trailing 365 days
+ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS pct_from_52w_high NUMERIC(10, 4);  -- close vs 52-week high (%, <= 0)
+ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS return_1m_pct NUMERIC(10, 4);      -- 21 sessions
+ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS return_3m_pct NUMERIC(10, 4);      -- 63 sessions
+ALTER TABLE technical_indicators ADD COLUMN IF NOT EXISTS return_1y_pct NUMERIC(10, 4);      -- 252 sessions
+
+-- Table 9: company_stats (latest fundamentals per ticker, refreshed by each daily run
+-- from TradingView; one row per ticker, overwritten, no history)
+CREATE TABLE IF NOT EXISTS company_stats (
+    ticker VARCHAR(10) PRIMARY KEY REFERENCES halal_universe(ticker),
+    as_of DATE NOT NULL,               -- session the figures were taken after
+    market_cap NUMERIC,                -- PKR
+    pe_ratio NUMERIC(12, 2),           -- trailing twelve months
+    eps_ttm NUMERIC(12, 4),            -- PKR, trailing twelve months
+    dividend_yield_pct NUMERIC(10, 4),
+    high_52w NUMERIC(10, 2),
+    low_52w NUMERIC(10, 2),
+    beta_1y NUMERIC(10, 4),
+    avg_volume_30d BIGINT,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
 -- View 1: Top 20 active halal tickers by market capitalisation
 CREATE OR REPLACE VIEW top_20_by_market_cap WITH (security_invoker = true) AS
 SELECT ticker, company_name, sector, market_cap_m
@@ -175,10 +200,25 @@ SELECT
     ti.sma_200,
     ti.volume_spike_ratio,
     ti.price_change_5d_pct,
-    ti.trending_score
+    ti.trending_score,
+    -- Columns added later go last: CREATE OR REPLACE VIEW can only append
+    ti.atr_14,
+    ti.high_52w,
+    ti.low_52w,
+    ti.pct_from_52w_high,
+    ti.return_1m_pct,
+    ti.return_3m_pct,
+    ti.return_1y_pct,
+    cs.market_cap,
+    cs.pe_ratio,
+    cs.eps_ttm,
+    cs.dividend_yield_pct,
+    cs.beta_1y,
+    cs.as_of AS stats_as_of
 FROM halal_universe hu
 LEFT JOIN recent r                ON r.ticker = hu.ticker AND r.rn = 1
 LEFT JOIN technical_indicators ti ON ti.ticker = r.ticker AND ti.trade_date = r.trade_date
+LEFT JOIN company_stats cs        ON cs.ticker = hu.ticker
 WHERE hu.is_active = TRUE;
 
 -- =====================================================================
@@ -299,6 +339,7 @@ ALTER TABLE trade_journal        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE watchlists           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE digest_log           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE company_stats        ENABLE ROW LEVEL SECURITY;
 
 -- Market data: read-only for signed-in users; anon gets nothing.
 DROP POLICY IF EXISTS "Signed-in users can read" ON halal_universe;
@@ -307,6 +348,8 @@ DROP POLICY IF EXISTS "Signed-in users can read" ON price_history;
 CREATE POLICY "Signed-in users can read" ON price_history FOR SELECT TO authenticated USING (true);
 DROP POLICY IF EXISTS "Signed-in users can read" ON technical_indicators;
 CREATE POLICY "Signed-in users can read" ON technical_indicators FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Signed-in users can read" ON company_stats;
+CREATE POLICY "Signed-in users can read" ON company_stats FOR SELECT TO authenticated USING (true);
 
 -- profiles: users read their own row and may change only the digest settings.
 -- Column privileges stop them rewriting email or unsubscribe_token.

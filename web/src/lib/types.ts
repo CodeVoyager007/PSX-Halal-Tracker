@@ -18,6 +18,20 @@ export interface SnapshotRow {
   volume_spike_ratio: Num;
   price_change_5d_pct: Num;
   trending_score: Num;
+  atr_14: Num;
+  high_52w: Num;
+  low_52w: Num;
+  pct_from_52w_high: Num;
+  return_1m_pct: Num;
+  return_3m_pct: Num;
+  return_1y_pct: Num;
+  /** From company_stats (TradingView), refreshed each daily run; null until first refresh. */
+  market_cap: Num;
+  pe_ratio: Num;
+  eps_ttm: Num;
+  dividend_yield_pct: Num;
+  beta_1y: Num;
+  stats_as_of: string | null;
 }
 
 export type DigestFrequency = "daily" | "weekly";

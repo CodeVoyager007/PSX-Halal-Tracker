@@ -2,10 +2,13 @@ name: Daily Data Ingestion
 
 on:
   schedule:
-    # Runs at 12:00 PM UTC (5:00 PM PKT) every Monday through Friday
-    # This safely clears the PSX Friday split-session close (4:30 PM PKT)
-    # as well as the standard Mon-Thu close (3:30 PM PKT).
-    - cron: '0 12 * * 1-5'
+    # 12:17 UTC (5:17 PM PKT) Mon-Fri: after both the Mon-Thu close (3:30 PM PKT)
+    # and the Friday close (4:30 PM PKT). Off the top of the hour, when GitHub's
+    # scheduler is busiest; top-of-hour runs here started 4-8 hours late.
+    - cron: '17 12 * * 1-5'
+    # Backup run three hours later in case the first is dropped or fails.
+    # Every step is idempotent and digest_log prevents duplicate emails.
+    - cron: '17 15 * * 1-5'
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 # Never let a manual run overlap the scheduled one
@@ -27,6 +30,12 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      # Optional. PSX refuses GitHub's runners; a proxy on a Pakistani
+      # connection restores full history and gap-filling (see README).
+      PSX_PROXY_URL: ${{ secrets.PSX_PROXY_URL }}
+      # Print logs as they happen. Without this, Python buffers output and a
+      # run killed by the timeout shows nothing at all.
+      PYTHONUNBUFFERED: '1'
 
     steps:
       - name: Checkout Repository
@@ -44,7 +53,9 @@ jobs:
       - name: Run Tests
         run: pytest -q
 
-      # Exits non-zero if any ticker fails or the newest stored price is stale
+      # Prices from PSX; if PSX refuses the runner, today's bar from TradingView.
+      # Also refreshes fundamentals. Exits non-zero if no source works, any
+      # ticker fails while PSX is up, or the newest stored price is stale.
       - name: Run Daily Ingestion Script
         run: python scripts/ingest_daily_data.py
 

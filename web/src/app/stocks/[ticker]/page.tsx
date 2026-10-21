@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowLeft, Check, ChevronDown, Plus, ShieldCheck } from "lucide-react";
-import { fmtDate, fmtNum, fmtPct, fmtPrice, isoDaysAgo, toNum } from "@/lib/format";
+import { fmtDate, fmtNum, fmtPct, fmtPkrCompact, fmtPrice, isoDaysAgo, toNum } from "@/lib/format";
 import { ChangePill, TickerBadge } from "@/components/market";
 import type { PricePoint, SnapshotRow } from "@/lib/types";
 import { addTickerForm, removeTicker } from "@/app/dashboard/actions";
@@ -44,13 +44,26 @@ export default async function StockPage({ params }: PageProps<"/stocks/[ticker]"
   const following = (watch ?? []).length > 0;
 
   const spike = toNum(snap.volume_spike_ratio);
+  const dividendYield = toNum(snap.dividend_yield_pct);
   const stats: [string, string][] = [
     ["5-day change", fmtPct(snap.price_change_5d_pct)],
+    ["1-month return", fmtPct(snap.return_1m_pct)],
+    ["3-month return", fmtPct(snap.return_3m_pct)],
+    ["1-year return", fmtPct(snap.return_1y_pct)],
+    ["52-week range", `${fmtPrice(snap.low_52w)} – ${fmtPrice(snap.high_52w)}`],
+    ["From 52-week high", fmtPct(snap.pct_from_52w_high)],
     ["RSI (14)", fmtNum(snap.rsi_14)],
     ["Volume", fmtNum(snap.volume)],
     ["Volume vs 20-day avg", spike === null ? "—" : `${fmtNum(spike, 1)}×`],
     ["50-day average", fmtPrice(snap.sma_50)],
     ["200-day average", fmtPrice(snap.sma_200)],
+    ["Avg daily range (ATR 14)", fmtPrice(snap.atr_14)],
+    ["Market cap", fmtPkrCompact(snap.market_cap)],
+    ["P/E (TTM)", fmtNum(snap.pe_ratio, 1)],
+    ["EPS (TTM)", fmtPrice(snap.eps_ttm)],
+    ["Dividend yield", dividendYield === null ? "—" : `${fmtNum(dividendYield, 2)}%`],
+    ["Beta (1 year)", fmtNum(snap.beta_1y, 2)],
+    ["Fundamentals as of", fmtDate(snap.stats_as_of)],
   ];
 
   return (

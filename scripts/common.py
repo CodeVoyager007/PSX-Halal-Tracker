@@ -24,6 +24,27 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# PSX's portal refuses requests from many datacenter IP ranges, GitHub Actions
+# runners included, while answering Pakistani connections normally. Setting
+# PSX_PROXY_URL (e.g. http://user:pass@host:port on a Pakistani server) routes
+# only PSX traffic through it; Supabase and Resend still connect directly.
+PSX_PROXY_URL = os.environ.get("PSX_PROXY_URL") or None
+
+
+def configure_psx_proxy(proxy_url: str | None = PSX_PROXY_URL) -> bool:
+    """Point every psxdata scraper session at proxy_url. Returns True if applied."""
+    if not proxy_url:
+        return False
+    client = psxdata.client._client()  # the shared client behind psxdata.stocks() etc.
+    for scraper in vars(client).values():
+        session = getattr(scraper, "_session", None)
+        if session is not None:
+            session.proxies.update({"http": proxy_url, "https": proxy_url})
+    return True
+
+
+configure_psx_proxy()
+
 # technical_indicators columns written per ticker. trending_score is excluded:
 # it is cross-ticker and filled afterwards by compute_trending_score().
 INDICATOR_COLUMNS = [
@@ -35,7 +56,13 @@ INDICATOR_COLUMNS = [
     "bb_upper", "bb_middle", "bb_lower",
     "avg_volume_20",
     "volume_spike_ratio", "price_change_5d_pct",
+    "atr_14",
+    "high_52w", "low_52w", "pct_from_52w_high",
+    "return_1m_pct", "return_3m_pct", "return_1y_pct",
 ]
+
+# Trading-day offsets for the period returns (PSX trades ~21 sessions a month)
+RETURN_PERIODS = {"return_1m_pct": 21, "return_3m_pct": 63, "return_1y_pct": 252}
 
 # pandas-ta output columns mapped to schema columns by name prefix, never by
 # position — a library change in output order must fail loudly, not silently
@@ -59,9 +86,27 @@ UPSERT_CHUNK_SIZE = 100
 PSX_REQUEST_PAUSE_SECONDS = 0.5
 PSX_RETRY_DELAYS_SECONDS = (5, 20)
 
+# After this many tickers in a row fail to fetch, PSX is refusing us (not one
+# bad symbol), so stop instead of grinding through ~300 doomed requests. Before
+# this existed, a blocked run took ~35 s per ticker and hit the job timeout.
+PSX_MAX_CONSECUTIVE_FAILURES = 5
+
 
 def now_pkt() -> datetime:
     return datetime.now(PKT)
+
+
+def last_session_date(now: datetime) -> date:
+    """
+    The most recent weekday whose session is finalised at `now` (PKT).
+    Market holidays are not known here; callers detect them from the data.
+    """
+    d = now.date()
+    if now.hour < TODAY_FINAL_HOUR_PKT:
+        d -= timedelta(days=1)
+    while d.weekday() >= 5:  # Saturday, Sunday
+        d -= timedelta(days=1)
+    return d
 
 
 def fetch_all(build_query: Callable) -> list[dict]:
@@ -154,21 +199,33 @@ def upsert_price_records(records: list[dict]):
         ).execute()
 
 
-def ingest_prices(tickers: list[str], start_for: Callable[[str], date]) -> tuple[date | None, list[str]]:
+def ingest_prices(tickers: list[str], start_for: Callable[[str], date]) -> tuple[date | None, list[str], bool]:
     """
     Fetch and upsert prices for each ticker from start_for(ticker) onwards.
-    Returns (newest trade_date stored, tickers that errored).
+    Returns (newest trade_date stored, tickers that errored or were not tried,
+    whether the run stopped early because PSX kept refusing requests).
     """
     newest: date | None = None
     failed: list[str] = []
+    consecutive_fetch_failures = 0
 
     for i, ticker in enumerate(tickers):
+        if consecutive_fetch_failures >= PSX_MAX_CONSECUTIVE_FAILURES:
+            remaining = tickers[i:]
+            print(f"\nPSX failed {consecutive_fetch_failures} tickers in a row; it is refusing this "
+                  f"connection. Skipping the remaining {len(remaining)} ticker(s).")
+            return newest, failed + remaining, True
         if i:
             time.sleep(PSX_REQUEST_PAUSE_SECONDS)
         try:
             start = start_for(ticker)
             print(f"Processing {ticker} (from {start})...")
-            records, skipped = fetch_with_retry(ticker, start)
+            try:
+                records, skipped = fetch_with_retry(ticker, start)
+            except Exception:
+                consecutive_fetch_failures += 1
+                raise
+            consecutive_fetch_failures = 0
             if skipped:
                 print(f"  Skipped {skipped} anomalous row(s).")
             if not records:
@@ -182,7 +239,7 @@ def ingest_prices(tickers: list[str], start_for: Callable[[str], date]) -> tuple
             print(f"  Error processing {ticker}: {e}")
             failed.append(ticker)
 
-    return newest, failed
+    return newest, failed, False
 
 
 def price_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
@@ -237,6 +294,8 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df.ta.rsi(length=14, append=True, col_names=("rsi_14",))
 
+    df.ta.atr(length=14, append=True, col_names=("atr_14",))
+
     # Multi-output indicators: map by column name (see MACD_COLUMNS / BBANDS_COLUMNS)
     macd = df.ta.macd(fast=12, slow=26, signal=9, append=False)
     bbands = df.ta.bbands(length=20, std=2, append=False)
@@ -248,7 +307,7 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     # pandas-ta appends nothing when history is shorter than the window (new
     # listings), so make sure every column exists and is NULL in that case
-    for col in ("sma_20", "sma_50", "sma_200", "ema_12", "ema_26", "rsi_14", "avg_volume_20"):
+    for col in ("sma_20", "sma_50", "sma_200", "ema_12", "ema_26", "rsi_14", "avg_volume_20", "atr_14"):
         if col not in df.columns:
             df[col] = np.nan
 
@@ -275,6 +334,27 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         (df["Close"] - close_5d_ago) / close_5d_ago * 100,
         None
     )
+
+    # --- 52-week range and period returns ---
+
+    # A calendar window (not a row count) so holidays and half-sessions don't
+    # stretch "52 weeks". With less history it is the range since listing/backfill.
+    df["high_52w"] = df["High"].rolling("365D", min_periods=1).max()
+    df["low_52w"] = df["Low"].rolling("365D", min_periods=1).min()
+    df["pct_from_52w_high"] = np.where(
+        df["high_52w"].notna() & (df["high_52w"] > 0),
+        (df["Close"] - df["high_52w"]) / df["high_52w"] * 100,
+        None
+    )
+
+    # Trading-day offsets like price_change_5d_pct; NULL until enough history exists
+    for col, periods in RETURN_PERIODS.items():
+        past_close = df["Close"].shift(periods)
+        df[col] = np.where(
+            past_close.notna() & (past_close != 0),
+            (df["Close"] - past_close) / past_close * 100,
+            None
+        )
 
     # Cast remaining NaNs → None so Supabase writes NULL
     df = df.replace({np.nan: None})

@@ -21,8 +21,11 @@ def main() -> int:
         return 1
 
     print(f"Found {len(tickers)} active tickers. Commencing backfill...")
-    _, failed = ingest_prices(tickers, lambda _ticker: start)
+    _, failed, psx_blocked = ingest_prices(tickers, lambda _ticker: start)
 
+    if psx_blocked:
+        print("\nERROR: PSX is refusing this connection. Run the backfill from a Pakistani "
+              "connection, or set PSX_PROXY_URL.")
     if failed:
         print(f"\nERROR: {len(failed)} ticker(s) failed: {', '.join(failed)}")
         return 1

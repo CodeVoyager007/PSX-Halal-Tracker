@@ -33,7 +33,11 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Refresh KMI All-Share Universe
+        # KMI index membership is only published by PSX, which refuses GitHub's
+        # runners: this job needs PSX_PROXY_URL, or a local run (see README).
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          PSX_PROXY_URL: ${{ secrets.PSX_PROXY_URL }}
+          PYTHONUNBUFFERED: '1'
         run: python scripts/update_universe.py

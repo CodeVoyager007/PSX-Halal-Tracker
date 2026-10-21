@@ -33,6 +33,7 @@ class FakeQuery:
     def limit(self, *a, **k): return self
     def eq(self, k, v): self.filters[k] = ("eq", v); return self
     def in_(self, k, v): self.filters[k] = ("in", list(v)); return self
+    def gte(self, k, v): self.filters[k] = ("gte", v); return self
     def upsert(self, p, **k): self.op, self.payload = "upsert", p; return self
     def update(self, p): self.op, self.payload = "update", p; return self
     def range(self, start, end): self.window = (start, end); return self
@@ -193,11 +194,88 @@ def test_ingest_prices_reports_failures_without_stopping(monkeypatch):
         return [{"ticker": ticker, "trade_date": "2026-01-05"}], 0
 
     monkeypatch.setattr(common, "fetch_price_records", fake_fetch)
-    newest, failed = common.ingest_prices(["BAD", "OK"], lambda t: date(2026, 1, 1))
+    newest, failed, blocked = common.ingest_prices(["BAD", "OK"], lambda t: date(2026, 1, 1))
 
     assert newest == date(2026, 1, 5)
     assert failed == ["BAD"]
+    assert not blocked
     assert len(upserts) == 1
+
+
+def test_ingest_prices_stops_when_psx_keeps_refusing(monkeypatch):
+    calls = []
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
+    monkeypatch.setattr(common, "upsert_price_records", lambda r: None)
+
+    def refused(ticker, start):
+        calls.append(ticker)
+        raise ConnectionError("PSX unreachable")
+
+    monkeypatch.setattr(common, "fetch_price_records", refused)
+    tickers = [f"T{i}" for i in range(300)]
+    newest, failed, blocked = common.ingest_prices(tickers, lambda t: date(2026, 1, 1))
+
+    limit = common.PSX_MAX_CONSECUTIVE_FAILURES
+    assert blocked and newest is None
+    assert failed == tickers  # untried tickers are reported too
+    # Each failed ticker is tried once plus its retries; nothing after the limit
+    assert len(calls) == limit * (len(common.PSX_RETRY_DELAYS_SECONDS) + 1)
+
+
+def test_isolated_failures_do_not_trip_the_breaker(monkeypatch):
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
+    monkeypatch.setattr(common, "upsert_price_records", lambda r: None)
+    tickers = [f"T{i}" for i in range(40)]
+    bad = set(tickers[::2])  # every other ticker fails: never 5 in a row
+
+    def fetch(ticker, start):
+        if ticker in bad:
+            raise ConnectionError("bad symbol")
+        return [{"ticker": ticker, "trade_date": "2026-01-05"}], 0
+
+    monkeypatch.setattr(common, "fetch_price_records", fetch)
+    _, failed, blocked = common.ingest_prices(tickers, lambda t: date(2026, 1, 1))
+    assert not blocked and set(failed) == bad
+
+
+@pytest.mark.parametrize("now, expected", [
+    (datetime(2026, 10, 21, 18, tzinfo=common.PKT), date(2026, 10, 21)),  # Wed after close
+    (datetime(2026, 10, 21, 14, tzinfo=common.PKT), date(2026, 10, 20)),  # Wed intraday
+    (datetime(2026, 10, 20, 1, tzinfo=common.PKT), date(2026, 10, 19)),   # delayed run past midnight
+    (datetime(2026, 10, 19, 9, tzinfo=common.PKT), date(2026, 10, 16)),   # Mon morning -> Fri
+    (datetime(2026, 10, 25, 12, tzinfo=common.PKT), date(2026, 10, 23)),  # Sunday -> Fri
+])
+def test_last_session_date(now, expected):
+    assert common.last_session_date(now) == expected
+
+
+def test_psx_proxy_applies_to_every_psxdata_session():
+    assert common.configure_psx_proxy(None) is False
+    assert common.configure_psx_proxy("http://proxy.example:8080") is True
+    client = common.psxdata.client._client()
+    sessions = [s._session for s in vars(client).values() if hasattr(s, "_session")]
+    assert sessions and all(s.proxies["https"] == "http://proxy.example:8080" for s in sessions)
+    for s in sessions:
+        s.proxies.clear()
+
+
+def test_extended_indicators():
+    rows = synthetic_prices(300)
+    df = common.process_dataframe(common.price_rows_to_frame(rows))
+    last = common.to_indicator_record("TEST", df.iloc[-1])
+
+    closes = pd.Series([r["close_price"] for r in rows])
+    assert last["return_1m_pct"] == pytest.approx((closes.iloc[-1] / closes.iloc[-22] - 1) * 100)
+    assert last["return_1y_pct"] == pytest.approx((closes.iloc[-1] / closes.iloc[-253] - 1) * 100)
+    assert last["low_52w"] <= last["high_52w"]
+    assert last["pct_from_52w_high"] <= 0
+    assert last["atr_14"] > 0
+    json.dumps(last)
+
+    short = common.process_dataframe(common.price_rows_to_frame(synthetic_prices(30)))
+    rec = common.to_indicator_record("NEW", short.iloc[-1])
+    assert rec["return_3m_pct"] is None and rec["return_1y_pct"] is None
+    assert rec["return_1m_pct"] is not None and rec["high_52w"] is not None
 
 
 # --- universe ---------------------------------------------------------------

@@ -10,10 +10,15 @@ from common import (
     compute_trending_score,
 )
 
-# Trailing rows fetched per ticker: enough for sma_200 plus warm-up. EMA/RSI/MACD
-# values from 205 rows match the full-history backfill to well below the
-# 2-decimal precision stored in the schema.
-LOOKBACK_ROWS = 205
+# Rows (re)written per ticker each run: the newest session plus enough before it
+# that days filled in late (a catch-up run after an outage, PSX corrections in
+# the overlap window) get indicators without a manual backfill.
+RECOMPUTE_ROWS = 30
+
+# Trailing rows fetched per ticker: the 1-year return looks back 252 sessions,
+# and EMA/RSI/MACD from this many rows match the full-history backfill to well
+# below the 2-decimal precision stored in the schema.
+LOOKBACK_ROWS = 252 + RECOMPUTE_ROWS
 
 
 def main() -> int:
@@ -27,6 +32,7 @@ def main() -> int:
     print(f"Found {len(tickers)} active tickers.")
 
     latest_date_by_ticker: dict[str, str] = {}
+    dates_written: set[str] = set()
     failed: list[str] = []
 
     for ticker in tickers:
@@ -53,15 +59,16 @@ def main() -> int:
             failed.append(ticker)
             continue
 
-        # process_dataframe sorts chronologically, so the final row is the latest trade_date
-        record = to_indicator_record(ticker, df.iloc[-1])
+        # process_dataframe sorts chronologically, so the final rows are the latest dates
+        records = [to_indicator_record(ticker, row) for _, row in df.tail(RECOMPUTE_ROWS).iterrows()]
 
         try:
             supabase.table("technical_indicators").upsert(
-                record, on_conflict="ticker,trade_date"
+                records, on_conflict="ticker,trade_date"
             ).execute()
-            latest_date_by_ticker[ticker] = record["trade_date"]
-            print(f"  Upserted daily indicators for {ticker} (Date: {record['trade_date']}).")
+            latest_date_by_ticker[ticker] = records[-1]["trade_date"]
+            dates_written.update(r["trade_date"] for r in records)
+            print(f"  Upserted indicators for {ticker} through {records[-1]['trade_date']}.")
         except Exception as e:
             print(f"  Error upserting daily record for {ticker}: {e}")
             failed.append(ticker)
@@ -81,8 +88,9 @@ def main() -> int:
         print(f"WARNING: newest price_history date is {newest}, not today ({today_pkt}). "
               "Daily ingestion may have failed, or today is a market holiday.")
 
-    # Rank every date written this run, not just the first ticker's date
-    for trade_date in sorted(set(latest_date_by_ticker.values())):
+    # Rank every date written this run: rewritten rows lose nothing, as the
+    # upsert above never includes trending_score, but late-filled days need one
+    for trade_date in sorted(dates_written):
         print(f"\nComputing trending_score for {trade_date}...")
         try:
             compute_trending_score(trade_date, tickers)
