@@ -47,6 +47,54 @@ def probes() -> list[tuple[str, str, str, dict]]:
     ]
 
 
+def inspect(client: httpx.Client):
+    """Print the start of each usable payload, to pin down the formats."""
+    import io
+    import re
+    import zipfile
+    day = last_weekday()
+
+    print("\n=== PSX market summary file contents ===")
+    r = client.get(f"https://dps.psx.com.pk/download/mkt_summary/{day}.Z")
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        for name in z.namelist():
+            lines = z.read(name).decode("latin-1").splitlines()
+            print(f"--- {name}: {len(lines)} lines")
+            for line in lines[:12]:
+                print("   ", repr(line))
+            for line in lines:
+                if "|OGDC|" in line or "|LUCK|" in line or "|MEBL|" in line:
+                    print("    MATCH", repr(line))
+
+    print("\n=== SCS Trade payload ===")
+    r = client.post("https://www.scstrade.com/MarketStatistics/MS_HistoricalPrices.aspx/chart",
+                    json={"par": "OGDC", "date1": (day - timedelta(days=10)).strftime("%m/%d/%Y"),
+                          "date2": day.strftime("%m/%d/%Y"), "rows": 3, "page": 1,
+                          "sidx": "trading_Date", "sord": "desc"})
+    print("   ", r.text[:900])
+
+    print("\n=== KMI All-Share table (header and first rows) ===")
+    r = client.get("https://dps.psx.com.pk/indices/KMIALLSHR")
+    rows = re.findall(r"<tr.*?</tr>", r.text, re.S)
+    print(f"    {len(rows)} <tr> rows")
+    for row in rows[:4]:
+        print("   ", re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " | ", row))[:300])
+    print("    XD/NC-style symbols:", sorted(set(re.findall(r">([A-Z]{2,9}(?:XD|XB|XR|NC))<", r.text)))[:20])
+
+    print("\n=== PSX endpoints with psxdata's XMLHttpRequest header ===")
+    xhr = {"X-Requested-With": "XMLHttpRequest"}
+    for method, url, kw in [("POST", "https://dps.psx.com.pk/historical", {"data": {"symbol": "OGDC"}}),
+                            ("GET", "https://dps.psx.com.pk/indices/KMIALLSHR", {}),
+                            ("GET", "https://dps.psx.com.pk/symbols", {})]:
+        r = client.request(method, url, headers=xhr, **kw)
+        print(f"    {r.status_code} {len(r.content):>9,} B  {method} {url}")
+
+    print("\n=== Yahoo OGDC.KA last closes ===")
+    r = client.get("https://query1.finance.yahoo.com/v8/finance/chart/OGDC.KA?range=5d&interval=1d")
+    res = r.json()["chart"]["result"][0]
+    print("   ", res.get("timestamp"), res["indicators"]["quote"][0].get("close"))
+
+
 def main() -> int:
     headers = {"User-Agent": UA, "Accept": "*/*", "Referer": "https://dps.psx.com.pk/"}
     with httpx.Client(headers=headers, timeout=20, follow_redirects=True) as client:
@@ -59,6 +107,11 @@ def main() -> int:
                       f"{label}\n       {url}\n       {preview!r}")
             except Exception as e:
                 print(f"ERR  {label}: {type(e).__name__}: {e}\n       {url}")
+        if "--inspect" in sys.argv:
+            try:
+                inspect(client)
+            except Exception as e:
+                print(f"inspect failed: {type(e).__name__}: {e}")
     return 0
 
 

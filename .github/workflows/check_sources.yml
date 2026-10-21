@@ -17,6 +17,6 @@ jobs:
         with:
           python-version: '3.14'
       - run: pip install httpx==0.28.1
-      - run: python scripts/check_sources.py
+      - run: python scripts/check_sources.py --inspect
         env:
           PYTHONUNBUFFERED: '1'
