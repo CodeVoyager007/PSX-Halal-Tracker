@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { LayoutDashboard, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import Logo from "./logo";
 
@@ -15,52 +14,23 @@ export default async function SiteHeader() {
         <Logo />
 
         {user ? (
-          <div className="flex items-center gap-2 text-sm">
-            <Link
-              href="/dashboard"
-              className="hidden items-center gap-1.5 rounded-lg px-3 py-2 font-medium text-secondary hover:bg-surface-2 hover:text-primary sm:flex"
-            >
-              <LayoutDashboard className="size-4" /> Dashboard
+          <div className="flex items-center gap-1 text-sm">
+            <Link href="/dashboard" className="rounded-lg px-3 py-2 font-medium text-secondary hover:bg-surface-2 hover:text-primary">
+              My watchlist
             </Link>
-            <span
-              className="grid size-9 place-items-center rounded-full bg-brand-soft text-sm font-semibold text-brand-soft-ink"
-              title={user.email ?? undefined}
-            >
-              {(user.email ?? "?").charAt(0).toUpperCase()}
-            </span>
             <form action="/auth/signout" method="post">
-              <button
-                className="grid size-9 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-primary"
-                aria-label="Sign out"
-                title="Sign out"
-              >
-                <LogOut className="size-4" />
+              <button className="rounded-lg px-3 py-2 text-muted hover:bg-surface-2 hover:text-primary" title={user.email ?? undefined}>
+                Sign out
               </button>
             </form>
           </div>
         ) : (
-          <div className="flex items-center gap-1 text-sm sm:gap-2">
-            <div className="hidden items-center md:flex">
-              {[
-                ["#features", "Features"],
-                ["#how", "How it works"],
-                ["#faq", "FAQ"],
-              ].map(([href, label]) => (
-                <a key={href} href={`/${href}`} className="rounded-lg px-3 py-2 text-secondary hover:text-primary">
-                  {label}
-                </a>
-              ))}
-            </div>
-            <Link href="/login" className="hidden whitespace-nowrap rounded-lg px-3 py-2 font-medium text-secondary hover:text-primary sm:block">
-              Sign in
-            </Link>
-            <Link
-              href="/login"
-              className="whitespace-nowrap rounded-lg bg-brand px-4 py-2 font-medium text-brand-ink shadow-card transition hover:bg-brand-strong"
-            >
-              Get started
-            </Link>
-          </div>
+          <Link
+            href="/login"
+            className="whitespace-nowrap rounded-lg border border-line px-4 py-2 text-sm font-medium text-secondary transition hover:border-brand hover:text-brand"
+          >
+            Sign in
+          </Link>
         )}
       </nav>
     </header>

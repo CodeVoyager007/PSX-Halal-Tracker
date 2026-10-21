@@ -11,7 +11,8 @@ export default function SiteFooter() {
         <p className="max-w-xl text-xs leading-relaxed text-muted md:text-right">
           For information only. Not investment advice, and not a recommendation to buy or sell any security.
           Shariah compliance follows the KMI All-Share index published by the Pakistan Stock Exchange. Prices
-          are end-of-day data from the PSX data portal and may be delayed or contain errors.
+          are end-of-day closing prices from PSX&apos;s official daily file, cross-checked with an independent source,
+          and may still contain errors.
         </p>
       </div>
     </footer>

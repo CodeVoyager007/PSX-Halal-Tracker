@@ -36,18 +36,20 @@ export async function removeTicker(formData: FormData) {
   revalidatePath(`/stocks/${ticker}`);
 }
 
-export async function updateDigest(formData: FormData) {
-  const frequency = formData.get("frequency");
-  if (frequency !== "daily" && frequency !== "weekly") return;
+export type DigestChoice = "daily" | "weekly" | "off";
+
+/** Daily, weekly (Fridays) or no digest; saved as soon as the user picks. */
+export async function setDigest(choice: DigestChoice): Promise<{ error?: string }> {
+  if (choice !== "daily" && choice !== "weekly" && choice !== "off") return { error: "Unknown option." };
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return;
-  const { error } = await supabase
-    .from("profiles")
-    .update({ digest_enabled: formData.get("enabled") === "on", digest_frequency: frequency })
-    .eq("id", user.id);
-  if (error) return;
+  if (!user) return { error: "Please sign in again." };
+  // "Off" keeps the last frequency, so switching back on restores it
+  const update = choice === "off" ? { digest_enabled: false } : { digest_enabled: true, digest_frequency: choice };
+  const { error } = await supabase.from("profiles").update(update).eq("id", user.id);
+  if (error) return { error: "Could not save. Please try again." };
   revalidatePath("/dashboard");
+  return {};
 }

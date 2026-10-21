@@ -33,31 +33,6 @@ export function TickerBadge({ ticker, size = "md" }: { ticker: string; size?: "m
   );
 }
 
-/** Small static trend line for illustrations and summaries. */
-export function Sparkline({
-  values,
-  className = "h-8 w-24",
-  tone = "auto",
-}: {
-  values: number[];
-  className?: string;
-  tone?: "auto" | "gain" | "loss";
-}) {
-  if (values.length < 2) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const pts = values.map((v, i) => [(i / (values.length - 1)) * 100, 28 - ((v - min) / (max - min || 1)) * 24]);
-  const up = tone === "auto" ? values[values.length - 1] >= values[0] : tone === "gain";
-  const colour = up ? "var(--gain)" : "var(--loss)";
-  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
-  return (
-    <svg viewBox="0 0 100 32" preserveAspectRatio="none" className={className} aria-hidden="true">
-      <path d={`${line}L100,32L0,32Z`} fill={colour} opacity="0.1" />
-      <path d={line} fill="none" stroke={colour} strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 /**
  * Diverging fill for heatmap tiles: gain or loss hue mixed into the surface by
  * magnitude, capped so text tokens stay readable on top. Direction is also

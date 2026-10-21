@@ -62,7 +62,7 @@ export default function AddStock({ options }: { options: CompanyOption[] }) {
         }}
         onKeyDown={onKeyDown}
         disabled={pending}
-        placeholder="Add a company: search by ticker, name or sector"
+        placeholder="Search a company to add"
         className="w-full rounded-xl border border-line bg-surface-2 py-3 pl-11 pr-10 outline-none transition placeholder:text-muted focus:border-brand focus:bg-surface focus:ring-4 focus:ring-brand/15 disabled:opacity-60"
       />
       <Search className="pointer-events-none absolute left-4 top-[1.4rem] size-4 -translate-y-1/2 text-muted" />

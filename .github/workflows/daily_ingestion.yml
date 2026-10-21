@@ -65,10 +65,13 @@ jobs:
 
       # Sends each subscriber their watchlist digest. digest_log prevents
       # duplicates, so this is safe after partial failures and re-runs.
-      # Skipped (not failed) until RESEND_API_KEY is configured.
+      # Skipped (not failed) until an email sender is configured: SMTP_USER and
+      # SMTP_PASSWORD (e.g. Gmail with an App Password), or RESEND_API_KEY.
       - name: Send Watchlist Digests
         if: ${{ !cancelled() }}
         env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DIGEST_FROM: ${{ vars.DIGEST_FROM }}
           APP_URL: ${{ vars.APP_URL }}

@@ -4,7 +4,15 @@ import { useState } from "react";
 import { ArrowRight, LoaderCircle, Mail, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LoginForm({ next }: { next: string }) {
+export default function LoginForm({
+  next,
+  autoFocus = true,
+  cta = "Email me a sign-in link",
+}: {
+  next: string;
+  autoFocus?: boolean;
+  cta?: string;
+}) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState("");
@@ -34,7 +42,8 @@ export default function LoginForm({ next }: { next: string }) {
         <MailCheck className="mx-auto size-8 text-brand" />
         <p className="mt-3 font-semibold text-primary">Check your inbox</p>
         <p className="mt-1 text-sm text-secondary">
-          We sent a sign-in link to <strong className="text-primary">{email}</strong>. It expires in one hour.
+          We sent a sign-in link to <strong className="text-primary">{email}</strong>. Open it on this device to
+          continue. It expires in one hour.
         </p>
         <button
           type="button"
@@ -60,7 +69,7 @@ export default function LoginForm({ next }: { next: string }) {
             type="email"
             required
             autoComplete="email"
-            autoFocus
+            autoFocus={autoFocus}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full rounded-xl border border-line bg-surface py-3 pl-10 pr-3 outline-none transition placeholder:text-muted focus:border-brand focus:ring-4 focus:ring-brand/15"
@@ -79,7 +88,7 @@ export default function LoginForm({ next }: { next: string }) {
           </>
         ) : (
           <>
-            Email me a sign-in link <ArrowRight className="size-4" />
+            {cta} <ArrowRight className="size-4" />
           </>
         )}
       </button>

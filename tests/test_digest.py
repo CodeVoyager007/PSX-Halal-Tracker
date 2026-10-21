@@ -1,6 +1,8 @@
 """Offline tests for digest selection, rendering and sending."""
 from datetime import date
 
+import smtplib
+
 import httpx
 import pytest
 
@@ -90,3 +92,62 @@ def test_send_batches_splits_and_records_failures(monkeypatch):
     assert calls[0].headers["Authorization"] == "Bearer key"
     assert sum(e is None for e in results.values()) == 100
     assert results["u149"] is not None
+
+
+# --- SMTP (Gmail) ---------------------------------------------------------------
+
+def sample_email(to="u@example.com"):
+    return {"from": "PSX Halal Tracker <me@gmail.com>", "to": [to], "subject": "Daily",
+            "html": "<p>hi</p>", "text": "hi",
+            "headers": {"List-Unsubscribe": "<https://app/api/unsubscribe?token=t>",
+                        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"}}
+
+
+def test_to_mime_has_text_html_and_unsubscribe_headers():
+    msg = send_digests.to_mime(sample_email())
+    assert msg["To"] == "u@example.com" and msg["Subject"] == "Daily"
+    assert msg["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+    assert msg["Message-ID"].endswith("@gmail.com>")
+    types = [part.get_content_type() for part in msg.iter_parts()]
+    assert types == ["text/plain", "text/html"]
+
+
+class FakeSMTP:
+    instances = []
+
+    def __init__(self, host, port, context=None, timeout=None):
+        self.host, self.port, self.sent, self.logged_in = host, port, [], None
+        FakeSMTP.instances.append(self)
+
+    def login(self, user, password):
+        if password == "wrong":
+            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+        self.logged_in = user
+
+    def send_message(self, msg):
+        if msg["To"] == "bounce@example.com":
+            raise smtplib.SMTPRecipientsRefused({msg["To"]: (550, b"no such user")})
+        self.sent.append(msg["To"])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_send_smtp_reports_each_recipient(monkeypatch):
+    monkeypatch.setattr(send_digests.smtplib, "SMTP_SSL", FakeSMTP)
+    monkeypatch.setattr(send_digests.time, "sleep", lambda s: None)
+    results = send_digests.send_smtp("smtp.gmail.com", 465, "me@gmail.com", "app-pass",
+                                     [("a", sample_email("a@example.com")), ("b", sample_email("bounce@example.com"))])
+    assert results["a"] is None and "no such user" in results["b"]
+    assert FakeSMTP.instances[-1].logged_in == "me@gmail.com"
+    assert FakeSMTP.instances[-1].sent == ["a@example.com"]
+
+
+def test_send_smtp_login_failure_fails_everyone(monkeypatch):
+    monkeypatch.setattr(send_digests.smtplib, "SMTP_SSL", FakeSMTP)
+    results = send_digests.send_smtp("smtp.gmail.com", 465, "me@gmail.com", "wrong",
+                                     [("a", sample_email()), ("b", sample_email())])
+    assert set(results) == {"a", "b"} and all("SMTP login failed" in e for e in results.values())

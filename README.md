@@ -11,7 +11,7 @@ Users sign in with an email link, build a watchlist from the ~300 companies in t
 | Data pipeline | `scripts/`, GitHub Actions | Loads PSX's official daily files, verifies them against SCS Trade, stores prices and fundamentals, computes indicators, sends digests |
 | Database & auth | Supabase (Postgres) | Market data, users, watchlists; Row Level Security keeps each user's data private |
 | Web app | `web/` (Next.js), Vercel | Sign-in, watchlist picker, dashboard, stock charts, unsubscribe |
-| Email | Resend | Digest delivery, and sign-in emails via Supabase custom SMTP |
+| Email | Gmail SMTP (free, no domain) or Resend | Digest delivery, and sign-in emails via Supabase custom SMTP |
 
 Market data is fetched and computed **once** for every halal stock; each user's digest is just a filter over it, so cost barely changes with user count.
 
@@ -25,13 +25,13 @@ Market data is fetched and computed **once** for every halal stock; each user's 
 1. Create a project at [supabase.com](https://supabase.com/).
 2. In the SQL Editor, run `db/schema.sql`. It is safe to re-run after changes.
 3. **Authentication → URL Configuration:** set *Site URL* to your web app URL and add `https://<your-app>/auth/callback` (and `http://localhost:3000/auth/callback` for development) to *Redirect URLs*.
-4. **Authentication → SMTP Settings:** enable custom SMTP using Resend (`smtp.resend.com`, port 465, user `resend`, password = your Resend API key). Supabase's built-in email is limited to a few messages per hour and is not meant for real users.
+4. **Authentication → Emails → SMTP Settings:** turn on custom SMTP with your Gmail (see step 2): host `smtp.gmail.com`, port `465`, username = your Gmail address, password = the App Password, sender email = the same Gmail address, sender name `PSX Halal Tracker`. Supabase's built-in email allows only a few messages per hour, so sign-up stalls without this.
 
-### 2. Resend (email)
-1. Create an account at [resend.com](https://resend.com/) and verify a sending domain.
-2. Create an API key.
+### 2. Email (Gmail, free, no domain needed)
+1. On the Gmail account that will send the emails, turn on **2-Step Verification** (myaccount.google.com → Security).
+2. Create an **App Password** at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (name it "PSX Halal Tracker"). Google shows a 16-character password once; copy it.
 
-The free tier covers roughly 100 emails per day; beyond that, digests need a paid plan.
+Gmail sends up to about 500 emails a day from a personal account, which covers sign-in links plus a few hundred daily digests. Beyond that, move to a provider with a sending domain (Resend, Brevo); the digest script also accepts `RESEND_API_KEY`, or any SMTP server via `SMTP_HOST`/`SMTP_PORT`.
 
 ### 3. GitHub Actions
 In **Settings → Secrets and variables → Actions**, add:
@@ -40,8 +40,9 @@ In **Settings → Secrets and variables → Actions**, add:
 |---|---|---|
 | Secret | `SUPABASE_URL` | Project URL |
 | Secret | `SUPABASE_KEY` | **service_role** key (bypasses RLS; never use it in the web app) |
-| Secret | `RESEND_API_KEY` | Resend API key (digests are skipped until set) |
-| Variable | `DIGEST_FROM` | e.g. `PSX Halal Tracker <digest@yourdomain.com>` |
+| Secret | `SMTP_USER` | The Gmail address that sends the digests |
+| Secret | `SMTP_PASSWORD` | Its 16-character App Password (digests are skipped until set) |
+| Variable | `DIGEST_FROM` | Optional, e.g. `PSX Halal Tracker <you@gmail.com>` (defaults to the Gmail address) |
 | Variable | `APP_URL` | Your web app URL, e.g. `https://psx-halal.vercel.app` |
 
 ### 4. Load the data (once)

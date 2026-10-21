@@ -5,18 +5,27 @@ Runs after the daily indicators step. Safe to re-run: digest_log records one row
 per user per market date, so nobody is emailed twice for the same data, and a
 market holiday (no new date) sends nothing.
 
-Environment:
-  RESEND_API_KEY  Resend API key. If unset the step is skipped, so the data
-                  pipeline works before email is configured.
-  DIGEST_FROM     Sender, e.g. "PSX Halal Tracker <digest@yourdomain.com>"
+Environment (set either the SMTP pair or RESEND_API_KEY; with neither, the
+step is skipped so the data pipeline works before email is configured):
+  SMTP_USER       SMTP login, e.g. a Gmail address. Gmail needs no domain and
+                  sends ~500 emails a day free; use a Google App Password.
+  SMTP_PASSWORD   SMTP password (for Gmail, the 16-character App Password)
+  SMTP_HOST       Default smtp.gmail.com
+  SMTP_PORT       Default 465 (implicit TLS)
+  RESEND_API_KEY  Resend API key, used when no SMTP login is set
+  DIGEST_FROM     Sender, e.g. "PSX Halal Tracker <you@gmail.com>"
   APP_URL         Public web app URL used for dashboard and unsubscribe links
 """
 import argparse
 import os
+import smtplib
+import ssl
 import sys
 import time
 from collections import defaultdict
 from datetime import date
+from email.message import EmailMessage
+from email.utils import formataddr, make_msgid, parseaddr
 from pathlib import Path
 
 import httpx
@@ -27,6 +36,7 @@ from digest_email import render_digest
 RESEND_BATCH_URL = "https://api.resend.com/emails/batch"
 BATCH_SIZE = 100            # Resend's maximum emails per batch request
 SECONDS_BETWEEN_BATCHES = 1  # stays under Resend's per-second request limit
+SECONDS_BETWEEN_SMTP_MESSAGES = 0.5  # Gmail throttles bursts from one account
 WEEKLY_SEND_WEEKDAY = 4      # Friday, after the week's last session
 # Never send data older than this; it means ingestion is broken
 MAX_DATA_AGE_DAYS = 7
@@ -94,18 +104,61 @@ def send_batches(client: httpx.Client, api_key: str, emails: list[tuple[str, dic
     return results
 
 
+def to_mime(email: dict) -> EmailMessage:
+    """A Resend-style email dict as a multipart (text + HTML) message for SMTP."""
+    msg = EmailMessage()
+    msg["From"] = email["from"]
+    msg["To"] = ", ".join(email["to"])
+    msg["Subject"] = email["subject"]
+    msg["Message-ID"] = make_msgid(domain=parseaddr(email["from"])[1].split("@")[-1] or None)
+    for name, value in email.get("headers", {}).items():
+        msg[name] = value
+    msg.set_content(email["text"])
+    msg.add_alternative(email["html"], subtype="html")
+    return msg
+
+
+def send_smtp(host: str, port: int, user: str, password: str,
+              emails: list[tuple[str, dict]]) -> dict[str, str | None]:
+    """Send (user_id, email) pairs over one SMTP session. Returns user_id -> None or an error."""
+    results: dict[str, str | None] = {}
+    try:
+        server = smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=30)
+        server.login(user, password)
+    except Exception as e:
+        error = f"SMTP login failed: {e}"[:500]
+        print(f"  {error}")
+        return {user_id: error for user_id, _ in emails}
+    with server:
+        for i, (user_id, email) in enumerate(emails):
+            if i:
+                time.sleep(SECONDS_BETWEEN_SMTP_MESSAGES)
+            try:
+                server.send_message(to_mime(email))
+                results[user_id] = None
+            except Exception as e:
+                results[user_id] = str(e)[:500]
+                print(f"  Sending to {email['to'][0]} failed: {results[user_id]}")
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Send watchlist digest emails.")
     parser.add_argument("--dry-run", metavar="DIR",
                         help="write each email as an .html file into DIR instead of sending or logging")
     args = parser.parse_args()
 
-    api_key = os.environ.get("RESEND_API_KEY")
-    sender = os.environ.get("DIGEST_FROM", "PSX Halal Tracker <onboarding@resend.dev>")
-    app_url = os.environ.get("APP_URL", "http://localhost:3000").rstrip("/")
+    smtp_user = os.environ.get("SMTP_USER") or None
+    smtp_password = os.environ.get("SMTP_PASSWORD") or None
+    api_key = os.environ.get("RESEND_API_KEY") or None
+    use_smtp = bool(smtp_user and smtp_password)
+    default_sender = formataddr(("PSX Halal Tracker", smtp_user)) if use_smtp \
+        else "PSX Halal Tracker <onboarding@resend.dev>"
+    sender = os.environ.get("DIGEST_FROM") or default_sender
+    app_url = (os.environ.get("APP_URL") or "http://localhost:3000").rstrip("/")
 
-    if not args.dry_run and not api_key:
-        print("RESEND_API_KEY is not set; skipping digests.")
+    if not args.dry_run and not use_smtp and not api_key:
+        print("No email sender configured (set SMTP_USER and SMTP_PASSWORD, or RESEND_API_KEY); skipping digests.")
         return 0
 
     now = now_pkt()
@@ -148,8 +201,14 @@ def main() -> int:
     if not emails:
         return 0
 
-    with httpx.Client() as client:
-        results = send_batches(client, api_key, emails)
+    if use_smtp:
+        host = os.environ.get("SMTP_HOST") or "smtp.gmail.com"
+        port = int(os.environ.get("SMTP_PORT") or 465)
+        print(f"Sending through {host} as {smtp_user}.")
+        results = send_smtp(host, port, smtp_user, smtp_password, emails)
+    else:
+        with httpx.Client() as client:
+            results = send_batches(client, api_key, emails)
 
     log_rows = [
         {"user_id": user_id, "digest_date": market_date,

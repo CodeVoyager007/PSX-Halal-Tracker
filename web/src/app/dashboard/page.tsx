@@ -1,38 +1,36 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CalendarClock, ChevronRight, Inbox, Layers, Mail, Plus, TrendingDown, TrendingUp, X } from "lucide-react";
+import { ChevronRight, Plus, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { fmtDate, fmtNum, fmtPrice, toNum } from "@/lib/format";
 import type { Profile, SnapshotRow } from "@/lib/types";
 import { ChangePill, TickerBadge } from "@/components/market";
 import AddStock from "./add-stock";
+import DigestPicker from "./digest-picker";
 import MarketOverview from "./market-overview";
-import { addTickerForm, removeTicker, updateDigest } from "./actions";
+import { addTickerForm, removeTicker, type DigestChoice } from "./actions";
 
-export const metadata = { title: "Dashboard · PSX Halal Tracker" };
+export const metadata = { title: "My watchlist · PSX Halal Tracker" };
 
-// Offered as one-click adds on an empty watchlist, when present in the universe
-const SUGGESTED = ["MEBL", "OGDC", "SYS", "HUBC", "ENGROH", "PPL", "EFERT", "ATRL"];
+// Offered as one-tap adds while setting up, when present in the universe
+const POPULAR = ["MEBL", "OGDC", "LUCK", "SYS", "HUBC", "ENGROH", "PPL", "EFERT", "MARI", "FCCL", "BIPL", "ATRL"];
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-  hint?: string;
-}) {
+function Card({ step, title, hint, children }: { step?: number; title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
-      <div className="flex items-center gap-2 text-sm text-secondary">
-        <Icon className="size-4 text-brand" /> {label}
+    <section className="rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-6">
+      <div className="flex items-start gap-3">
+        {step && (
+          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-sm font-semibold text-brand-ink">
+            {step}
+          </span>
+        )}
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          {hint && <p className="mt-0.5 text-sm text-secondary">{hint}</p>}
+        </div>
       </div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
-      {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
-    </div>
+      <div className="mt-5">{children}</div>
+    </section>
   );
 }
 
@@ -57,201 +55,112 @@ export default async function Dashboard() {
   const options = all
     .filter((r) => !watched.has(r.ticker))
     .map(({ ticker, company_name, sector }) => ({ ticker, company_name, sector }));
-  const suggestions = SUGGESTED.filter((t) => options.some((o) => o.ticker === t));
+  const popular = POPULAR.map((t) => all.find((r) => r.ticker === t)).filter(
+    (r): r is SnapshotRow => !!r && !watched.has(r.ticker),
+  );
   const marketDate = all.reduce<string | null>(
     (max, r) => (r.trade_date && (!max || r.trade_date > max) ? r.trade_date : max),
     null,
   );
+  const digest: DigestChoice = !profile?.digest_enabled ? "off" : profile.digest_frequency === "weekly" ? "weekly" : "daily";
+  const settingUp = rows.length === 0;
 
-  const gainers = rows.filter((r) => (toNum(r.change_1d_pct) ?? 0) > 0).length;
-  const losers = rows.filter((r) => (toNum(r.change_1d_pct) ?? 0) < 0).length;
-  const digestLabel = !profile?.digest_enabled
-    ? "Off"
-    : profile.digest_frequency === "weekly"
-      ? "Fridays"
-      : "Daily";
+  const popularButtons = popular.length > 0 && (
+    <div className="mt-4">
+      <p className="text-sm text-secondary">Popular choices, tap to add:</p>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {popular.slice(0, settingUp ? 12 : 6).map((r) => (
+          <form key={r.ticker} action={addTickerForm}>
+            <input type="hidden" name="ticker" value={r.ticker} />
+            <button className="flex w-full items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5 text-left transition hover:border-brand hover:bg-brand-soft">
+              <Plus className="size-4 shrink-0 text-brand" />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold">{r.ticker}</span>
+                <span className="block truncate text-xs text-muted">{r.company_name}</span>
+              </span>
+            </button>
+          </form>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 px-4 py-10 sm:px-6">
-      <div className="relative isolate overflow-hidden rounded-3xl bg-gradient-to-br from-[#065f46] via-[#047857] to-[#0f766e] px-6 py-8 text-white shadow-lift sm:px-8">
-        <div className="pattern-star absolute inset-0 -z-10 opacity-60" aria-hidden="true" />
-        <div className="absolute -right-16 -top-20 -z-10 size-64 rounded-full bg-[#e0b35c]/30 blur-3xl" aria-hidden="true" />
-        <p className="text-sm text-white/75">Assalam-o-Alaikum</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Your halal watchlist</h1>
-        <p className="mt-2 text-sm text-white/80">
-          Closing prices for {fmtDate(marketDate)} · updated after each trading day
+    <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">{settingUp ? "Welcome! Two quick steps" : "My watchlist"}</h1>
+        <p className="mt-1 text-sm text-secondary">
+          {settingUp
+            ? "Choose your companies and how often you want the email. You can change both any time."
+            : `Closing prices for ${fmtDate(marketDate)}. Updated every trading day after 5 PM PKT.`}
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={Layers} label="Following" value={`${rows.length} / 50`} hint="companies" />
-        <StatCard icon={TrendingUp} label="Up today" value={String(gainers)} hint="closed higher" />
-        <StatCard icon={TrendingDown} label="Down today" value={String(losers)} hint="closed lower" />
-        <StatCard
-          icon={CalendarClock}
-          label="Email digest"
-          value={digestLabel}
-          hint={profile?.digest_enabled ? "around 5 PM PKT" : "turned off"}
-        />
-      </div>
+      {settingUp ? (
+        <>
+          <Card step={1} title="Pick the companies you want to follow" hint="All of them are Shariah-compliant (KMI All-Share index).">
+            <AddStock options={options} />
+            {popularButtons}
+          </Card>
+          <Card step={2} title="How often should we email you?">
+            <DigestPicker value={digest} email={profile?.email ?? null} />
+          </Card>
+        </>
+      ) : (
+        <>
+          <Card title="Your email">
+            <DigestPicker value={digest} email={profile?.email ?? null} />
+          </Card>
 
-      <section className="rounded-2xl border border-line bg-surface shadow-card">
-        <div className="border-b border-line p-5">
-          <AddStock options={options} />
-        </div>
-
-        {rows.length === 0 ? (
-          <div className="px-6 py-16 text-center">
-            <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-brand-soft text-brand-soft-ink">
-              <Inbox className="size-6" />
-            </span>
-            <h2 className="mt-5 text-lg font-semibold">Start your watchlist</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm text-secondary">
-              Search above, or add some of the most-followed Shariah-compliant companies:
-            </p>
-            <div className="mt-6 flex flex-wrap justify-center gap-2">
-              {suggestions.map((t) => (
-                <form key={t} action={addTickerForm}>
-                  <input type="hidden" name="ticker" value={t} />
-                  <button className="inline-flex items-center gap-1 rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm font-medium shadow-card transition hover:border-brand hover:text-brand">
-                    <Plus className="size-3.5" /> {t}
-                  </button>
-                </form>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="relative overflow-x-auto">
-            {/* relative keeps the absolutely positioned sr-only header inside this scroll area */}
-            <table className="w-full text-sm md:min-w-[720px]">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-muted">
-                  <th className="px-4 py-3 font-medium sm:px-5">Company</th>
-                  <th className="px-2 py-3 text-right font-medium sm:px-5">Close</th>
-                  <th className="px-2 py-3 text-right font-medium sm:px-5">1 day</th>
-                  <th className="hidden px-5 py-3 text-right font-medium md:table-cell">5 days</th>
-                  <th className="hidden px-5 py-3 text-right font-medium md:table-cell">RSI 14</th>
-                  <th className="hidden px-5 py-3 text-right font-medium md:table-cell">Volume vs avg</th>
-                  <th className="px-2 py-3 sm:px-5">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {rows.map((r) => {
-                  const spike = toNum(r.volume_spike_ratio);
-                  const stale = r.trade_date && marketDate && r.trade_date < marketDate;
-                  return (
-                    <tr key={r.ticker} className="group transition hover:bg-surface-2/60">
-                      <td className="px-4 py-3.5 sm:px-5">
-                        <Link href={`/stocks/${r.ticker}`} className="flex items-center gap-3">
-                          <span className="hidden sm:block">
-                            <TickerBadge ticker={r.ticker} />
+          <Card title={`Companies you follow (${rows.length} of 50)`} hint="Tap a company for its chart and details.">
+            <AddStock options={options} />
+            <ul className="mt-4 divide-y divide-line overflow-hidden rounded-xl border border-line">
+              {rows.map((r) => {
+                const spike = toNum(r.volume_spike_ratio);
+                const stale = r.trade_date && marketDate && r.trade_date < marketDate;
+                return (
+                  <li key={r.ticker} className="group flex items-center gap-3 bg-surface px-3 py-3 sm:px-4">
+                    <Link href={`/stocks/${r.ticker}`} className="flex min-w-0 flex-1 items-center gap-3">
+                      <TickerBadge ticker={r.ticker} />
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1 font-semibold group-hover:text-brand">
+                          {r.ticker}
+                          <ChevronRight className="size-3.5 text-muted" />
+                        </span>
+                        <span className="block truncate text-xs text-muted">
+                          {stale ? `Last traded ${fmtDate(r.trade_date)}` : r.company_name}
+                        </span>
+                        {spike !== null && spike >= 2 && (
+                          <span className="mt-1 inline-block rounded-full bg-gold-soft px-2 py-0.5 text-[11px] font-medium text-gold">
+                            Unusual volume: {fmtNum(spike, 1)}× normal
                           </span>
-                          <span className="min-w-0">
-                            <span className="flex items-center gap-1 font-semibold group-hover:text-brand">
-                              {r.ticker}
-                              <ChevronRight className="size-3.5 opacity-0 transition group-hover:opacity-100" />
-                            </span>
-                            <span className="block max-w-[7.5rem] truncate text-xs text-muted sm:max-w-[16rem]">
-                              {stale ? `Last traded ${fmtDate(r.trade_date)}` : r.company_name}
-                            </span>
-                          </span>
-                        </Link>
-                      </td>
-                      <td className="px-2 py-3.5 text-right font-medium tabular-nums sm:px-5">{fmtPrice(r.close_price)}</td>
-                      <td className="px-2 py-3.5 text-right sm:px-5">
-                        <ChangePill value={r.change_1d_pct} />
-                      </td>
-                      <td className="hidden px-5 py-3.5 text-right md:table-cell">
-                        <ChangePill value={r.price_change_5d_pct} />
-                      </td>
-                      <td className="hidden px-5 py-3.5 text-right tabular-nums text-secondary md:table-cell">{fmtNum(r.rsi_14)}</td>
-                      <td className="hidden px-5 py-3.5 text-right tabular-nums md:table-cell">
-                        {spike === null ? (
-                          <span className="text-muted">—</span>
-                        ) : spike >= 2 ? (
-                          <span className="rounded-full bg-gold-soft px-2 py-0.5 text-xs font-medium text-gold">
-                            {fmtNum(spike, 1)}× unusual
-                          </span>
-                        ) : (
-                          <span className="text-secondary">{fmtNum(spike, 1)}×</span>
                         )}
-                      </td>
-                      <td className="px-2 py-3.5 text-right sm:px-5">
-                        <form action={removeTicker}>
-                          <input type="hidden" name="ticker" value={r.ticker} />
-                          <button
-                            className="grid size-8 place-items-center rounded-lg text-muted opacity-60 transition hover:bg-loss-soft hover:text-loss group-hover:opacity-100"
-                            aria-label={`Remove ${r.ticker} from watchlist`}
-                            title="Remove"
-                          >
-                            <X className="size-4" />
-                          </button>
-                        </form>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <MarketOverview rows={all} marketDate={marketDate} watched={watched} />
-
-      <section className="rounded-2xl border border-line bg-surface p-6 shadow-card">
-        <div className="flex items-start gap-4">
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-soft-ink">
-            <Mail className="size-5" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="font-semibold">Email digest</h2>
-            <p className="mt-1 text-sm text-secondary">
-              Sent to <span className="font-medium text-primary">{profile?.email}</span> after the market closes.
-            </p>
-
-            <form action={updateDigest} className="mt-5 flex flex-wrap items-center gap-x-8 gap-y-4">
-              <label className="flex cursor-pointer items-center gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  name="enabled"
-                  defaultChecked={profile?.digest_enabled ?? true}
-                  className="peer sr-only"
-                />
-                <span className="relative h-6 w-11 rounded-full bg-line-strong transition peer-checked:bg-brand peer-focus-visible:ring-4 peer-focus-visible:ring-brand/20 after:absolute after:left-0.5 after:top-0.5 after:size-5 after:rounded-full after:bg-surface after:shadow after:transition peer-checked:after:translate-x-5" />
-                Send me the digest
-              </label>
-
-              <fieldset className="flex rounded-xl border border-line bg-surface-2 p-1 text-sm">
-                <legend className="sr-only">Frequency</legend>
-                {[
-                  ["daily", "Every trading day"],
-                  ["weekly", "Weekly (Fri)"],
-                ].map(([value, label]) => (
-                  <label key={value} className="cursor-pointer">
-                    <input
-                      type="radio"
-                      name="frequency"
-                      value={value}
-                      defaultChecked={(profile?.digest_frequency ?? "daily") === value}
-                      className="peer sr-only"
-                    />
-                    <span className="block rounded-lg px-3.5 py-1.5 text-secondary transition peer-checked:bg-surface peer-checked:font-medium peer-checked:text-primary peer-checked:shadow-card peer-focus-visible:ring-2 peer-focus-visible:ring-brand">
-                      {label}
+                      </span>
+                    </Link>
+                    <span className="shrink-0 text-right">
+                      <span className="block font-medium tabular-nums">{fmtPrice(r.close_price)}</span>
+                      <ChangePill value={r.change_1d_pct} />
                     </span>
-                  </label>
-                ))}
-              </fieldset>
+                    <form action={removeTicker}>
+                      <input type="hidden" name="ticker" value={r.ticker} />
+                      <button
+                        className="grid size-9 place-items-center rounded-lg text-muted transition hover:bg-loss-soft hover:text-loss"
+                        aria-label={`Stop following ${r.ticker}`}
+                        title="Stop following"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </form>
+                  </li>
+                );
+              })}
+            </ul>
+            {rows.length < 6 && popularButtons}
+          </Card>
 
-              <button className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-brand-ink shadow-card transition hover:bg-brand-strong">
-                Save settings
-              </button>
-            </form>
-          </div>
-        </div>
-      </section>
+          <MarketOverview rows={all} marketDate={marketDate} watched={watched} />
+        </>
+      )}
     </div>
   );
 }
