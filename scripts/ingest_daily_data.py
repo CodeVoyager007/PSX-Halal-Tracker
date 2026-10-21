@@ -257,12 +257,13 @@ def ingest(start_for: dict[str, date], session: date, now: datetime) -> tuple[li
                 print(f"\nNot using TradingView at {now:%H:%M} PKT: today's session is still live.")
 
         if records:
-            print(f"\nVerifying {len(records)} bar(s) against a second source...")
+            # Store first, so a failure while verifying cannot lose the prices
+            upsert_price_records(records)
+            print(f"\nStored {len(records)} bar(s). Verifying them against a second source...")
             counts = verify(http, records, session, now)
+            upsert_price_records([r for r in records if r["verified_with"]])
             print(f"  {counts['verified']} verified, {counts['mismatched']} disagreed, "
                   f"{counts['unchecked']} could not be checked.")
-            upsert_price_records(records)
-            print(f"  Stored {len(records)} bar(s).")
     return records, status
 
 

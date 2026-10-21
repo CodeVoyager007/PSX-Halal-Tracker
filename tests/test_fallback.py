@@ -279,3 +279,17 @@ def test_provisional_tradingview_days_are_replaced_by_psx(daily, monkeypatch):
     monkeypatch.setattr(daily, "provisional_dates", lambda since: {"A": date(2026, 10, 21)})
     assert daily.main() == 0
     assert [(r["ticker"], r["trade_date"], r["source"]) for r in stored_rows] == [("A", "2026-10-21", "psx")]
+
+
+def test_prices_are_stored_before_verification(daily, monkeypatch):
+    daily, _, stored_rows, _, _ = daily
+    import market_data as md
+
+    def scs_crash(http, t, start, end):
+        assert stored_rows, "prices must already be stored when verification starts"
+        raise RuntimeError("SCS down")
+
+    monkeypatch.setattr(md, "fetch_scs_history", scs_crash)
+    assert daily.main() == 0
+    assert {(r["ticker"], r["trade_date"]) for r in stored_rows} == {
+        ("A", "2026-10-20"), ("A", "2026-10-21"), ("B", "2026-10-20"), ("B", "2026-10-21")}
