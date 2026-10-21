@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fmtDate, fmtNum, fmtPrice, toNum } from "@/lib/format";
 import type { Profile, SnapshotRow } from "@/lib/types";
 import { ChangePill, TickerBadge } from "@/components/market";
+import { FillArt } from "@/components/art";
 import AddStock from "./add-stock";
 import DigestPicker from "./digest-picker";
 import MarketOverview from "./market-overview";
@@ -17,7 +18,7 @@ const POPULAR = ["MEBL", "OGDC", "LUCK", "SYS", "HUBC", "ENGROH", "PPL", "EFERT"
 
 function Card({ step, title, hint, children }: { step?: number; title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-6">
+    <section className="reveal rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-6">
       <div className="flex items-start gap-3">
         {step && (
           <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-sm font-semibold text-brand-ink">
@@ -72,7 +73,7 @@ export default async function Dashboard() {
         {popular.slice(0, settingUp ? 12 : 6).map((r) => (
           <form key={r.ticker} action={addTickerForm}>
             <input type="hidden" name="ticker" value={r.ticker} />
-            <button className="flex w-full items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5 text-left transition hover:border-brand hover:bg-brand-soft">
+            <button className="lift flex w-full items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5 text-left transition hover:border-brand hover:bg-brand-soft">
               <Plus className="size-4 shrink-0 text-brand" />
               <span className="min-w-0">
                 <span className="block text-sm font-semibold">{r.ticker}</span>
@@ -87,9 +88,15 @@ export default async function Dashboard() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">{settingUp ? "Welcome! Two quick steps" : "My watchlist"}</h1>
-        <p className="mt-1 text-sm text-secondary">
+      <div className="relative isolate overflow-hidden rounded-3xl bg-gradient-to-br from-[#065f46] via-[#047857] to-[#0f766e] px-6 py-8 text-white shadow-lift sm:px-8">
+        <FillArt art="arches" sizes="(min-width: 896px) 896px, 100vw" className="-z-20 opacity-25 mix-blend-luminosity" />
+        <div className="pattern-star absolute inset-0 -z-10 opacity-60" aria-hidden="true" />
+        <div className="float absolute -right-16 -top-20 -z-10 size-64 rounded-full bg-[#e0b35c]/30 blur-3xl" aria-hidden="true" />
+        <p className="fade-up text-sm text-white/75">Assalam-o-Alaikum</p>
+        <h1 className="fade-up mt-1 text-3xl font-semibold tracking-tight" style={{ "--delay": "0.1s" } as React.CSSProperties}>
+          {settingUp ? "Welcome! Two quick steps" : "My halal watchlist"}
+        </h1>
+        <p className="fade-up mt-2 text-sm text-white/85" style={{ "--delay": "0.2s" } as React.CSSProperties}>
           {settingUp
             ? "Choose your companies and how often you want the email. You can change both any time."
             : `Closing prices for ${fmtDate(marketDate)}. Updated every trading day after 5 PM PKT.`}
@@ -119,7 +126,7 @@ export default async function Dashboard() {
                 const spike = toNum(r.volume_spike_ratio);
                 const stale = r.trade_date && marketDate && r.trade_date < marketDate;
                 return (
-                  <li key={r.ticker} className="group flex items-center gap-3 bg-surface px-3 py-3 sm:px-4">
+                  <li key={r.ticker} className="group flex items-center gap-3 bg-surface px-3 py-3 transition hover:bg-surface-2 sm:px-4">
                     <Link href={`/stocks/${r.ticker}`} className="flex min-w-0 flex-1 items-center gap-3">
                       <TickerBadge ticker={r.ticker} />
                       <span className="min-w-0">

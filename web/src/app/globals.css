@@ -129,6 +129,95 @@ html {
   background-size: 56px 56px;
 }
 
+/* --- Motion -------------------------------------------------------------------
+   Everything below is decorative: without support or with reduced motion the
+   page simply shows its content still. Only transform and opacity animate. */
+
+/* Sections rise in as they scroll into view. Progressive enhancement: browsers
+   without scroll-driven animations (Firefox) show content without the effect. */
+@keyframes reveal-in {
+  from { opacity: 0; translate: 0 2.5rem; scale: 0.98; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports ((animation-timeline: view()) and (animation-range: entry)) {
+    .reveal {
+      animation: reveal-in auto ease-out backwards;
+      /* After the shorthand, or the shorthand resets it */
+      animation-timeline: view();
+      animation-range: entry 0% entry 90%;
+    }
+  }
+}
+
+/* Hero artwork settles in once on load */
+@keyframes settle {
+  from { scale: 1.1; opacity: 0.4; }
+}
+.settle {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: settle 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+}
+
+/* Hero copy fades up in sequence on load */
+@keyframes fade-up {
+  from { opacity: 0; translate: 0 1rem; }
+}
+.fade-up {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: fade-up 0.8s ease-out both;
+    animation-delay: var(--delay, 0s);
+  }
+}
+
+/* Gentle bob for decorative floating cards */
+@keyframes float {
+  50% { translate: 0 -10px; }
+}
+.float {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: float 6s ease-in-out infinite;
+  }
+}
+
+/* Slow shimmer across gradient headline text */
+@keyframes shimmer {
+  to { background-position: 200% center; }
+}
+.shimmer {
+  background-size: 200% auto;
+  @media (prefers-reduced-motion: no-preference) {
+    animation: shimmer 8s linear infinite;
+  }
+}
+
+/* Scrolling ticker tape; content is duplicated so -50% loops seamlessly.
+   Pauses on hover or keyboard focus; off entirely for reduced motion. */
+@keyframes ticker {
+  to { translate: -50% 0; }
+}
+.ticker-track {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: ticker 60s linear infinite;
+  }
+}
+.ticker-wrap:hover .ticker-track,
+.ticker-wrap:focus-within .ticker-track {
+  animation-play-state: paused;
+}
+
+/* Cards lift slightly under the pointer */
+.lift {
+  transition: translate 0.25s ease, box-shadow 0.25s ease;
+  &:hover {
+    translate: 0 -4px;
+    box-shadow: var(--shadow-lift);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:hover { translate: none; }
+  }
+}
+
 /* Headlines use Fraunces with its softer, slightly quirky forms switched on */
 h1, h2, .font-display {
   font-family: var(--font-display);
