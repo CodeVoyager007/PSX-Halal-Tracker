@@ -1,0 +1,22 @@
+name: Check Data Sources
+
+# Manual diagnostic: which market-data sources answer GitHub's runners today.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: pip install httpx==0.28.1
+      - run: python scripts/check_sources.py
+        env:
+          PYTHONUNBUFFERED: '1'
