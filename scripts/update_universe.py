@@ -12,6 +12,29 @@ KMI_30_INDEX = "KMI30"
 # tickers are deactivated on the strength of it.
 MIN_CONSTITUENTS = 250
 
+# PSX's index listing appends a status marker to some symbols, e.g. LUCKXD for
+# Lucky Cement while it trades ex-dividend, or DSLNC for a company flagged
+# non-compliant. Stored as-is they never match any price data, and the real
+# ticker looks like it left the index (on 2026-09-23 this deactivated LUCK,
+# MARI, FCCL and SAZEW). XD ex-dividend, XB ex-bonus, XR ex-rights, XA ex-all,
+# NC non-compliant.
+STATUS_SUFFIXES = ("XD", "XB", "XR", "XA", "NC")
+
+
+def base_symbol(symbol: str, known: set[str]) -> str:
+    """
+    The tradable symbol behind an index listing entry. A suffix is stripped only
+    when PSX's symbol list lacks the listed symbol but has the shorter one, so a
+    real ticker that happens to end in these letters is left alone.
+    """
+    if symbol in known:
+        return symbol
+    for suffix in STATUS_SUFFIXES:
+        base = symbol.removesuffix(suffix)
+        if base != symbol and base in known:
+            return base
+    return symbol
+
 
 def fetch_constituents() -> list[dict]:
     """
@@ -25,12 +48,15 @@ def fetch_constituents() -> list[dict]:
         if df is None or df.empty or "symbol" not in df.columns:
             raise ValueError(f"psxdata returned no constituents for {name}.")
 
-    kmi_30_symbols = set(kmi_30["symbol"])
     sectors = psxdata.symbols(cache=False).set_index("symbol")["sector_name"].to_dict()
+    known = set(sectors)
+    kmi_30_symbols = {base_symbol(s, known) for s in kmi_30["symbol"]}
 
     records = []
     for row in all_share.to_dict("records"):
-        ticker = row["symbol"]
+        ticker = base_symbol(row["symbol"], known)
+        if ticker != row["symbol"]:
+            print(f"  {row['symbol']} is listed with a status suffix; storing it as {ticker}.")
         record = {"ticker": ticker, "is_kmi_30": ticker in kmi_30_symbols}
         if pd.notna(row.get("name")):
             record["company_name"] = row["name"]

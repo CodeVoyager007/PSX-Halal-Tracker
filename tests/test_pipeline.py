@@ -183,6 +183,20 @@ def test_fetch_retries_transient_failures(monkeypatch):
     assert sleeps == [common.PSX_RETRY_DELAYS_SECONDS[0]]
 
 
+def test_fetch_does_not_retry_a_403(monkeypatch):
+    sleeps, calls = [], []
+    monkeypatch.setattr(common.time, "sleep", sleeps.append)
+
+    def refused(ticker, start):
+        calls.append(ticker)
+        raise common.PSXAuthError("PSX auth error (403)")
+
+    monkeypatch.setattr(common, "fetch_price_records", refused)
+    with pytest.raises(common.PSXAuthError):
+        common.fetch_with_retry("OGDC", date(2026, 1, 1))
+    assert calls == ["OGDC"] and sleeps == []
+
+
 def test_ingest_prices_reports_failures_without_stopping(monkeypatch):
     upserts = []
     monkeypatch.setattr(common.time, "sleep", lambda s: None)
@@ -314,6 +328,37 @@ def test_universe_short_list_deactivates_nothing(monkeypatch):
     db, status = run_universe(monkeypatch, [{"ticker": "OLD", "is_active": True}], constituents(40))
     assert status == 0
     assert not db.ops("update")
+
+
+@pytest.mark.parametrize("listed, expected", [
+    ("LUCKXD", "LUCK"),   # ex-dividend marker
+    ("DSLNC", "DSL"),     # non-compliant marker
+    ("BPLXB", "BPL"),     # ex-bonus marker
+    ("OGDC", "OGDC"),     # plain symbol
+    ("ABCNC", "ABCNC"),   # a real symbol ending in NC stays whole
+    ("ZZZXD", "ZZZXD"),   # unknown either way: left as listed
+])
+def test_base_symbol(listed, expected):
+    import update_universe as uu
+    known = {"LUCK", "DSL", "BPL", "OGDC", "ABCNC", "ABC"}
+    assert uu.base_symbol(listed, known) == expected
+
+
+def test_fetch_constituents_strips_status_suffixes(monkeypatch):
+    import update_universe as uu
+    indices = {
+        "KMIALLSHR": pd.DataFrame({"symbol": ["LUCKXD", "OGDC"], "name": ["Lucky Cement", "OGDCL"],
+                                   "market_cap_m": [1.0, 2.0]}),
+        "KMI30": pd.DataFrame({"symbol": ["LUCKXD"]}),
+    }
+    monkeypatch.setattr(uu.psxdata, "indices", lambda name, cache: indices[name])
+    monkeypatch.setattr(uu.psxdata, "symbols", lambda cache: pd.DataFrame(
+        {"symbol": ["LUCK", "OGDC"], "sector_name": ["CEMENT", "OIL & GAS EXPLORATION COMPANIES"]}))
+
+    records = {r["ticker"]: r for r in uu.fetch_constituents()}
+    assert set(records) == {"LUCK", "OGDC"}
+    assert records["LUCK"]["is_kmi_30"] and records["LUCK"]["sector"] == "Cement"
+    assert not records["OGDC"]["is_kmi_30"]
 
 
 def test_universe_fetch_failure_changes_nothing(monkeypatch):

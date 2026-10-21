@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pandas_ta_classic as ta  # noqa: F401 — registers the DataFrame.ta accessor
 import psxdata
+from psxdata.exceptions import PSXAuthError
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -184,7 +185,8 @@ def fetch_with_retry(ticker: str, start: date) -> tuple[list[dict], int]:
         try:
             return fetch_price_records(ticker, start)
         except Exception as e:
-            if delay is None:
+            # 403 is PSX refusing this IP, not a glitch: waiting will not change it
+            if delay is None or isinstance(e, PSXAuthError):
                 raise
             print(f"  Attempt {attempt} failed ({e}); retrying in {delay}s.")
             time.sleep(delay)
