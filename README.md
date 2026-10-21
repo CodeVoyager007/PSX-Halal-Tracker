@@ -60,7 +60,9 @@ Or skip the local step entirely: run the *Weekly Universe Refresh* workflow, the
 ### 5. Web app (Vercel)
 1. Import the repository in [Vercel](https://vercel.com/) and set the **Root Directory** to `web`.
 2. Add environment variables `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the public anon/publishable key). Optional: `NEXT_PUBLIC_CONTACT_EMAIL` (shown on About, Privacy and Terms, and as a footer Contact link; without it those pages tell people to reply to a digest) and `NEXT_PUBLIC_SITE_URL` (only when moving to a custom domain; used for canonical links, the sitemap and share previews).
-3. Deploy, then use the deployed URL for Supabase's Site URL and the `APP_URL` variable above.
+3. Add `SMTP_USER` and `SMTP_PASSWORD` (the same Gmail address and App Password as the GitHub secrets). The website uses them to send a user's first digest the moment they finish setup, and for the dashboard's "Email me today's update" button. They are server-only (never prefix them `NEXT_PUBLIC_`).
+4. Deploy, then use the deployed URL for Supabase's Site URL and the `APP_URL` variable above.
+5. Branded sign-in emails: paste `supabase/email-templates/sign-in.html` into Supabase's **Magic Link** and **Confirm signup** templates (see the README in that folder).
 
 ## Development
 

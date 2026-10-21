@@ -106,6 +106,25 @@ const enabled = (await db.query(`SELECT digest_enabled e FROM profiles WHERE id 
 const other = (await db.query(`SELECT digest_enabled e FROM profiles WHERE id = '${U2}'`)).rows[0].e;
 ok(unsub === true && bogus === null && enabled === false && other === true, "anon unsubscribe by token affects only that user");
 
+// --- "email me now" claims
+await db.exec(`SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '${U1}', false);`);
+const c1 = (await db.query("SELECT public.claim_digest(CURRENT_DATE - 1) AS ok")).rows[0].ok;
+const c2 = (await db.query("SELECT public.claim_digest(CURRENT_DATE - 1) AS ok")).rows[0].ok;
+ok(c1 === true && c2 === false, "claim_digest claims a date once per user");
+await db.query("SELECT public.release_digest(CURRENT_DATE - 1)");
+const c3 = (await db.query("SELECT public.claim_digest(CURRENT_DATE - 1) AS ok")).rows[0].ok;
+ok(c3 === true, "release_digest frees a fresh claim after a failed send");
+await db.exec("RESET ROLE");
+await db.exec(`UPDATE digest_log SET sent_at = now() - interval '1 hour' WHERE user_id = '${U1}'`);
+await db.exec(`SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '${U1}', false);`);
+await db.query("SELECT public.release_digest(CURRENT_DATE - 1)");
+await db.exec("RESET ROLE");
+ok((await db.query(`SELECT count(*)::int n FROM digest_log WHERE user_id = '${U1}'`)).rows[0].n === 1,
+   "release_digest cannot remove an old digest record");
+await db.exec("SET ROLE anon; SELECT set_config('request.jwt.claim.sub', '', false);");
+await rejects("SELECT public.claim_digest(CURRENT_DATE)", "anon cannot claim digests");
+await db.exec("RESET ROLE");
+
 // --- account deletion
 await db.exec("SET ROLE anon; SELECT set_config('request.jwt.claim.sub', '', false);");
 await rejects("SELECT public.delete_my_account()", "anon cannot call delete_my_account");

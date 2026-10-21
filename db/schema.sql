@@ -325,6 +325,34 @@ $$;
 REVOKE ALL ON FUNCTION public.delete_my_account() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.delete_my_account() TO authenticated;
 
+-- "Email me now" from the website: claim today's digest for the caller before
+-- sending, so the scheduled job (which skips users with a 'sent' row for the
+-- date) never emails the same day twice. Returns FALSE if already claimed.
+CREATE OR REPLACE FUNCTION public.claim_digest(market_date DATE) RETURNS BOOLEAN
+LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
+    WITH ins AS (
+        INSERT INTO public.digest_log (user_id, digest_date, status)
+        SELECT auth.uid(), market_date, 'sent' WHERE auth.uid() IS NOT NULL
+        ON CONFLICT (user_id, digest_date) DO NOTHING
+        RETURNING 1
+    )
+    SELECT EXISTS (SELECT 1 FROM ins)
+$$;
+REVOKE ALL ON FUNCTION public.claim_digest(DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.claim_digest(DATE) TO authenticated;
+
+-- Undo a claim when sending failed, so the scheduled job retries. Only a
+-- claim from the last few minutes can be released, so it cannot be used to
+-- re-send old digests over and over.
+CREATE OR REPLACE FUNCTION public.release_digest(market_date DATE) RETURNS VOID
+LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
+    DELETE FROM public.digest_log
+    WHERE user_id = auth.uid() AND digest_date = market_date
+      AND status = 'sent' AND sent_at > now() - interval '5 minutes'
+$$;
+REVOKE ALL ON FUNCTION public.release_digest(DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.release_digest(DATE) TO authenticated;
+
 -- Public directory of the halal universe for the landing-page search. Exposes
 -- only the index constituent list (ticker, name, sector), never prices.
 CREATE OR REPLACE FUNCTION public.company_directory()

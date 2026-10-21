@@ -10,6 +10,8 @@ import AddStock from "./add-stock";
 import DigestPicker from "./digest-picker";
 import MarketOverview from "./market-overview";
 import DeleteAccount from "./delete-account";
+import SetupWizard from "./setup-wizard";
+import EmailNow from "./email-now";
 import { addTickerForm, removeTicker, type DigestChoice } from "./actions";
 
 export const metadata = { title: "My watchlist", robots: { index: false, follow: false } };
@@ -105,19 +107,16 @@ export default async function Dashboard() {
       </div>
 
       {settingUp ? (
-        <>
-          <Card step={1} title="Pick the companies you want to follow" hint="All of them are Shariah-compliant (KMI All-Share index).">
-            <AddStock options={options} />
-            {popularButtons}
-          </Card>
-          <Card step={2} title="How often should we email you?">
-            <DigestPicker value={digest} email={profile?.email ?? null} />
-          </Card>
-        </>
+        <SetupWizard
+          options={options}
+          popular={popular.map(({ ticker, company_name, sector }) => ({ ticker, company_name, sector }))}
+          email={profile?.email ?? null}
+        />
       ) : (
         <>
           <Card title="Your email">
             <DigestPicker value={digest} email={profile?.email ?? null} />
+            {digest !== "off" && <EmailNow />}
           </Card>
 
           <Card title={`Companies you follow (${rows.length} of 50)`} hint="Tap a company for its chart and details.">

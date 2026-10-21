@@ -74,9 +74,14 @@ export default function DigestPicker({ value, email }: { value: DigestChoice; em
             <LoaderCircle className="size-4 animate-spin" /> Saving…
           </>
         ) : status === "saved" ? (
-          <>
-            <Check className="size-4 text-gain" /> Saved.
-          </>
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-gain-soft px-3 py-1.5 font-medium text-gain">
+            <Check className="size-4" />
+            {current === "off"
+              ? "Saved. Emails are off."
+              : current === "weekly"
+                ? "Saved. You'll get an email every Friday after the close."
+                : "Saved. You'll get an email every trading day around 5 PM."}
+          </span>
         ) : status === "error" ? (
           <span className="text-loss">{error}</span>
         ) : current === "off" ? (
