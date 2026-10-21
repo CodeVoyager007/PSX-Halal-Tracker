@@ -236,3 +236,17 @@ h1, h2, .font-display {
 .tabular-nums, table {
   font-variant-numeric: tabular-nums;
 }
+
+/* Readable long-form text for About, Privacy and Terms */
+.prose-page {
+  line-height: 1.75;
+  color: var(--text-secondary);
+  & h2 { margin-top: 2.5rem; font-size: 1.5rem; font-weight: 600; color: var(--text-primary); }
+  & h2:first-child { margin-top: 0; }
+  & h3 { margin-top: 1.5rem; font-weight: 600; color: var(--text-primary); }
+  & p, & ul { margin-top: 0.75rem; }
+  & ul { list-style: disc; padding-left: 1.25rem; }
+  & li + li { margin-top: 0.35rem; }
+  & strong { color: var(--text-primary); font-weight: 600; }
+  & a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+}

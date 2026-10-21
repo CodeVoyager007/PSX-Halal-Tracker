@@ -106,5 +106,21 @@ const enabled = (await db.query(`SELECT digest_enabled e FROM profiles WHERE id 
 const other = (await db.query(`SELECT digest_enabled e FROM profiles WHERE id = '${U2}'`)).rows[0].e;
 ok(unsub === true && bogus === null && enabled === false && other === true, "anon unsubscribe by token affects only that user");
 
+// --- account deletion
+await db.exec("SET ROLE anon; SELECT set_config('request.jwt.claim.sub', '', false);");
+await rejects("SELECT public.delete_my_account()", "anon cannot call delete_my_account");
+await db.exec(`RESET ROLE; SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '${U2}', false);`);
+await db.query("SELECT public.delete_my_account()");
+await db.exec("RESET ROLE");
+const left = (await db.query(`SELECT
+  (SELECT count(*)::int FROM auth.users WHERE id = '${U2}') u2_user,
+  (SELECT count(*)::int FROM profiles WHERE id = '${U2}') u2_profile,
+  (SELECT count(*)::int FROM portfolio WHERE user_id = '${U2}') u2_portfolio,
+  (SELECT count(*)::int FROM auth.users WHERE id = '${U1}') u1_user,
+  (SELECT count(*)::int FROM watchlists WHERE user_id = '${U1}') u1_watch`)).rows[0];
+ok(left.u2_user === 0 && left.u2_profile === 0 && left.u2_portfolio === 0,
+   "delete_my_account removes the caller's account and cascades to their data");
+ok(left.u1_user === 1 && left.u1_watch === 50, "delete_my_account leaves other users untouched");
+
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
 process.exit(failures ? 1 : 0);

@@ -15,7 +15,7 @@ const TABLE_ROWS = 30;
 
 export async function generateMetadata({ params }: PageProps<"/stocks/[ticker]">) {
   const { ticker } = await params;
-  return { title: `${decodeURIComponent(ticker).toUpperCase()} · PSX Halal Tracker` };
+  return { title: decodeURIComponent(ticker).toUpperCase(), robots: { index: false, follow: false } };
 }
 
 export default async function StockPage({ params }: PageProps<"/stocks/[ticker]">) {

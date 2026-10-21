@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
-import { ArrowRight, ChevronDown, Lock, Mail, ShieldCheck } from "lucide-react";
+import { ArrowRight, ChevronDown, CircleCheck, Lock, Mail, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ChangePill } from "@/components/market";
 import { FillArt, type ArtKey } from "@/components/art";
 import LoginForm from "./login/login-form";
 import CompanySearch from "./company-search";
+import { SITE } from "@/lib/site";
 
 // Illustrative figures for the decorative tape and sample email only; not live prices.
 const SAMPLE = [
@@ -58,7 +59,29 @@ function TickerTape() {
   );
 }
 
-export default async function Home() {
+// Structured data so search engines understand what the site is
+const JSON_LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "WebSite", name: SITE.name, url: SITE.url, description: SITE.description, inLanguage: "en" },
+    {
+      "@type": "WebApplication",
+      name: SITE.name,
+      url: SITE.url,
+      applicationCategory: "FinanceApplication",
+      operatingSystem: "Any",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "PKR" },
+      description: SITE.description,
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: FAQ.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+    },
+  ],
+};
+
+export default async function Home({ searchParams }: PageProps<"/">) {
+  const deleted = (await searchParams).deleted === "1";
   const supabase = await createClient();
   const {
     data: { user },
@@ -71,6 +94,12 @@ export default async function Home() {
 
   return (
     <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD).replace(/</g, "\\u003c") }} />
+      {deleted && (
+        <div role="status" className="flex items-center justify-center gap-2 bg-brand-soft px-4 py-3 text-sm text-brand-soft-ink">
+          <CircleCheck className="size-4" /> Your account and all its data have been deleted.
+        </div>
+      )}
       {/* Hero: commissioned Karachi-skyline artwork, sign-up form right here */}
       <section className="relative isolate overflow-hidden bg-[#04130d] text-white">
         <FillArt art="hero" sizes="100vw" preload className="settle -z-20 object-[70%_center]" />

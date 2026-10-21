@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 // All writes go through the signed-in user's session, so the RLS policies in
@@ -52,4 +53,13 @@ export async function setDigest(choice: DigestChoice): Promise<{ error?: string 
   if (error) return { error: "Could not save. Please try again." };
   revalidatePath("/dashboard");
   return {};
+}
+
+/** Permanently delete the signed-in user's account and everything tied to it. */
+export async function deleteAccount(): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("delete_my_account");
+  if (error) return { error: "Could not delete your account. Please try again." };
+  await supabase.auth.signOut();
+  redirect("/?deleted=1");
 }

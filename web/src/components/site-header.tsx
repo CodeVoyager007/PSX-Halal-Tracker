@@ -25,12 +25,17 @@ export default async function SiteHeader() {
             </form>
           </div>
         ) : (
-          <Link
-            href="/login"
-            className="whitespace-nowrap rounded-lg border border-line px-4 py-2 text-sm font-medium text-secondary transition hover:border-brand hover:text-brand"
-          >
-            Sign in
-          </Link>
+          <div className="flex items-center gap-1 text-sm">
+            <Link href="/about" className="rounded-lg px-3 py-2 text-secondary hover:text-primary">
+              About
+            </Link>
+            <Link
+              href="/login"
+              className="whitespace-nowrap rounded-lg border border-line px-4 py-2 font-medium text-secondary transition hover:border-brand hover:text-brand"
+            >
+              Sign in
+            </Link>
+          </div>
         )}
       </nav>
     </header>

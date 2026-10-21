@@ -10,7 +10,7 @@ Users sign in with an email link, build a watchlist from the ~300 companies in t
 |---|---|---|
 | Data pipeline | `scripts/`, GitHub Actions | Loads PSX's official daily files, verifies them against SCS Trade, stores prices and fundamentals, computes indicators, sends digests |
 | Database & auth | Supabase (Postgres) | Market data, users, watchlists; Row Level Security keeps each user's data private |
-| Web app | `web/` (Next.js), Vercel | Sign-in, watchlist picker, dashboard, stock charts, unsubscribe |
+| Web app | `web/` (Next.js), Vercel | Sign-in, watchlist picker, dashboard, stock charts, unsubscribe, account deletion, About/Privacy/Terms, SEO (sitemap, robots, share image, structured data) |
 | Email | Gmail SMTP (free, no domain) or Resend | Digest delivery, and sign-in emails via Supabase custom SMTP |
 
 Market data is fetched and computed **once** for every halal stock; each user's digest is just a filter over it, so cost barely changes with user count.
@@ -59,7 +59,7 @@ Or skip the local step entirely: run the *Weekly Universe Refresh* workflow, the
 
 ### 5. Web app (Vercel)
 1. Import the repository in [Vercel](https://vercel.com/) and set the **Root Directory** to `web`.
-2. Add environment variables `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the public anon/publishable key).
+2. Add environment variables `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the public anon/publishable key). Optional: `NEXT_PUBLIC_CONTACT_EMAIL` (shown on About, Privacy and Terms, and as a footer Contact link; without it those pages tell people to reply to a digest) and `NEXT_PUBLIC_SITE_URL` (only when moving to a custom domain; used for canonical links, the sitemap and share previews).
 3. Deploy, then use the deployed URL for Supabase's Site URL and the `APP_URL` variable above.
 
 ## Development

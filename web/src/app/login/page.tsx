@@ -4,7 +4,11 @@ import { LogoMark } from "@/components/logo";
 import { FillArt } from "@/components/art";
 import LoginForm from "./login-form";
 
-export const metadata = { title: "Sign in · PSX Halal Tracker" };
+export const metadata = {
+  title: "Sign in",
+  description: "Sign in or create a free account with just your email. No password needed.",
+  alternates: { canonical: "/login" },
+};
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const params = await searchParams;

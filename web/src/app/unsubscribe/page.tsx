@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Mail, MailCheck, MailX } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
-export const metadata = { title: "Unsubscribe · PSX Halal Tracker" };
+export const metadata = { title: "Unsubscribe", robots: { index: false, follow: false } };
 
 async function confirmUnsubscribe(formData: FormData) {
   "use server";

@@ -9,9 +9,10 @@ import { FillArt } from "@/components/art";
 import AddStock from "./add-stock";
 import DigestPicker from "./digest-picker";
 import MarketOverview from "./market-overview";
+import DeleteAccount from "./delete-account";
 import { addTickerForm, removeTicker, type DigestChoice } from "./actions";
 
-export const metadata = { title: "My watchlist · PSX Halal Tracker" };
+export const metadata = { title: "My watchlist", robots: { index: false, follow: false } };
 
 // Offered as one-tap adds while setting up, when present in the universe
 const POPULAR = ["MEBL", "OGDC", "LUCK", "SYS", "HUBC", "ENGROH", "PPL", "EFERT", "MARI", "FCCL", "BIPL", "ATRL"];
@@ -168,6 +169,19 @@ export default async function Dashboard() {
           <MarketOverview rows={all} marketDate={marketDate} watched={watched} />
         </>
       )}
+
+      <section className="rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-6">
+        <h2 className="text-lg font-semibold">Account</h2>
+        <p className="mt-0.5 text-sm text-secondary">
+          Signed in as <strong className="font-medium text-primary">{profile?.email}</strong>.{" "}
+          <Link href="/privacy" className="text-brand hover:underline">
+            How we use your data
+          </Link>
+        </p>
+        <div className="mt-4">
+          <DeleteAccount />
+        </div>
+      </section>
     </div>
   );
 }

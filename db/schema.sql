@@ -313,6 +313,18 @@ $$;
 REVOKE ALL ON FUNCTION public.unsubscribe_digest(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.unsubscribe_digest(UUID) TO anon, authenticated;
 
+-- Let a signed-in user delete their own account. SECURITY DEFINER because
+-- users cannot touch auth.users; it only ever deletes the caller's row, and
+-- ON DELETE CASCADE removes their profile, watchlist, portfolio, journal and
+-- digest log with it.
+-- (A signed-out caller matches no row, so nothing is deleted.)
+CREATE OR REPLACE FUNCTION public.delete_my_account() RETURNS VOID
+LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
+    DELETE FROM auth.users WHERE id = auth.uid() AND auth.uid() IS NOT NULL
+$$;
+REVOKE ALL ON FUNCTION public.delete_my_account() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_my_account() TO authenticated;
+
 -- Public directory of the halal universe for the landing-page search. Exposes
 -- only the index constituent list (ticker, name, sector), never prices.
 CREATE OR REPLACE FUNCTION public.company_directory()
